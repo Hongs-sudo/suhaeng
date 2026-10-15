@@ -1,5 +1,5 @@
 // 부모님 리포트: 데이터 만들기 + 화면 그리기 + 이미지 만들기 (앱과 공유 링크 페이지가 함께 사용)
-import { UNITS, UNIT_LINES } from "./rubric.js";
+import { UNITS, UNIT_LINES } from "./rubric.js?v=3";
 
 export const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 export const fmt = n => n == null || isNaN(n) ? "–" : (Math.round(n * 10) / 10).toString();
@@ -9,7 +9,7 @@ export const unitBr = (g, r) => esc((UNIT_LINES[g] || [])[r - 1] || "").replace(
 // 응시한 순서(날짜순)로 회차를 정렬 — 1~10회를 순서대로 진행하지 않아도 그대로 반영
 export function takenRounds(rounds) {
   return Object.entries(rounds || {})
-    .filter(([, x]) => x && x.status !== "결시" && typeof x.score === "number")
+    .filter(([, x]) => x && x.status !== "결시" && typeof x.score === "number" && !x.aiScore)
     .map(([r, x]) => ({ round: +r, ...x }))
     .sort((a, b) => (a.date || "").localeCompare(b.date || "") || a.round - b.round);
 }
@@ -25,7 +25,7 @@ export function classAverages(students, records) {
   for (const s of students) {
     const rr = records[s.id] || {};
     for (const [r, x] of Object.entries(rr)) {
-      if (!x || typeof x.score !== "number" || x.status === "결시") continue;
+      if (!x || typeof x.score !== "number" || x.status === "결시" || x.aiScore) continue;
       const k = `${s.grade}_${r}`; (acc[k] = acc[k] || []).push(x.score);
     }
   }

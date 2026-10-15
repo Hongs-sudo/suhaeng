@@ -67,6 +67,9 @@ class FirebaseStore {
     await this.F.setDoc(this.d("programs", PID, "records", sid), { rounds: { [r]: v } }, { merge: true });
   }
   async setRounds(sid, rounds) { await this.F.setDoc(this.d("programs", PID, "records", sid), { rounds }, { merge: true }); }
+  async saveJob(id, data) { await this.F.setDoc(this.d("programs", PID, "bulk", id), data, { merge: true }); }
+  async listJobs() { return this.all(this.col("programs", PID, "bulk")); }
+  async deleteJob(id) { await this.F.deleteDoc(this.d("programs", PID, "bulk", id)); }
   // 다른 선생님·다른 기기에서 바꾼 내용이 바로 반영되도록 실시간 구독
   watch(onStudents, onRecords) {
     const u1 = this.F.onSnapshot(this.col("students"), q => onStudents(q.docs.map(x => ({ id: x.id, ...x.data() }))), () => {});
@@ -114,9 +117,10 @@ const LS = "suhaeng-demo-v1";
 class DemoStore {
   async init() {
     try { this.s = JSON.parse(localStorage.getItem(LS)); } catch (e) { this.s = null; }
-    if (!this.s) this.s = (await import("./demo-data.js")).seed();
+    if (!this.s) this.s = (await import("./demo-data.js?v=3")).seed();
   }
-  save() { try { localStorage.setItem(LS, JSON.stringify(this.s)); } catch (e) { /* 저장 공간 부족 등은 무시 */ } }
+  // 스캔 이미지는 용량이 커서 브라우저 저장에서 빼고 메모리에만 둔다 (데모 전용)
+  save() { try { const { scans, ...rest } = this.s; localStorage.setItem(LS, JSON.stringify(rest)); } catch (e) { /* 저장 공간 부족 등은 무시 */ } }
   onAuth(cb) {
     this._cb = cb;
     let who = null; try { who = sessionStorage.getItem(LS + "-who"); } catch (e) {}
@@ -140,6 +144,9 @@ class DemoStore {
   }
   async setRounds(sid, rounds) { this.s.records[sid] = { ...(this.s.records[sid] || {}), ...rounds }; this.save(); }
   watch() { return () => {}; }
+  async saveJob(id, d) { this.s.bulk = this.s.bulk || {}; this.s.bulk[id] = { ...(this.s.bulk[id] || {}), ...d, id }; this.save(); }
+  async listJobs() { return Object.values(this.s.bulk || {}); }
+  async deleteJob(id) { if (this.s.bulk) delete this.s.bulk[id]; this.save(); }
   async getRecord(sid) { return JSON.parse(JSON.stringify(this.s.records[sid] || {})); }
   async listTeachers() { return Object.values(this.s.teachers); }
   async saveTeacher(t) { const e = lowerEmail(t.email); this.s.teachers[e] = { ...(this.s.teachers[e] || {}), ...t, email: e }; this.save(); }
@@ -147,7 +154,7 @@ class DemoStore {
   async getAnalysis(sid, r) { return this.s.analyses[`${sid}_${r}`] || null; }
   async listAnalyses(sid) { const o = {}; Object.values(this.s.analyses).filter(a => a.sid === sid).forEach(a => o[a.round] = a); return o; }
   async saveAnalysis(sid, r, a) { this.s.analyses[`${sid}_${r}`] = { ...a, sid, round: +r }; this.save(); }
-  async saveScans(sid, r, urls) { this.s.scans = this.s.scans || {}; this.s.scans[`${sid}_${r}`] = urls.slice(0, 3); this.save(); }
+  async saveScans(sid, r, urls) { this.s.scans = this.s.scans || {}; this.s.scans[`${sid}_${r}`] = urls.slice(0, 6); this.save(); }
   async getScans(sid, r) { return (this.s.scans || {})[`${sid}_${r}`] || []; }
   async countScans() { return Object.values(this.s.scans || {}).reduce((a, x) => a + x.length, 0); }
   async deleteAllScans() { const n = await this.countScans(); this.s.scans = {}; this.save(); return n; }

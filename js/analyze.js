@@ -1,5 +1,5 @@
 // 시험지 스캔 처리 + 분석 서버 호출
-import { RUBRIC, UNITS } from "./rubric.js";
+import { RUBRIC, UNITS } from "./rubric.js?v=3";
 
 export const ERROR_TYPES = ["개념 이해", "조건 해석", "계산 실수", "풀이 과정 서술", "미응답"];
 
@@ -149,4 +149,68 @@ function demoComment(s) {
     improve: s.topError ? `감점은 '${s.topError}'에서 가장 많았습니다. 답을 구한 근거를 문장으로 끝까지 쓰는 연습이 필요합니다.` : `점수 변동이 있는 단원을 중심으로 서술 과정을 보완하겠습니다.`,
     plan: `다음 회차에서는 풀이 근거 쓰기를 집중 연습하고, 토요일 피드백에서 틀린 유형을 다시 풀어 보겠습니다.`
   };
+}
+
+/* ---------- 일괄 올리기: 큰 PDF·사진 묶음을 쪽 단위 이미지로 ---------- */
+// 메모리를 아끼려고 data URL 대신 Blob(JPEG, 긴 변 1600px)으로 보관한다.
+export async function filesToPageBlobs(files, onProgress = () => {}) {
+  const out = [];
+  const toBlob = c => new Promise(r => c.toBlob(r, "image/jpeg", 0.72));
+  for (const f of files) {
+    if (f.type === "application/pdf" || /\.pdf$/i.test(f.name)) {
+      const lib = await pdfjs();
+      const doc = await lib.getDocument({ data: await f.arrayBuffer() }).promise;
+      for (let i = 1; i <= doc.numPages && out.length < 400; i++) {
+        const page = await doc.getPage(i);
+        const vp0 = page.getViewport({ scale: 1 });
+        const vp = page.getViewport({ scale: 1600 / Math.max(vp0.width, vp0.height) });
+        const c = document.createElement("canvas"); c.width = Math.round(vp.width); c.height = Math.round(vp.height);
+        const g = c.getContext("2d"); g.fillStyle = "#fff"; g.fillRect(0, 0, c.width, c.height);
+        await page.render({ canvasContext: g, viewport: vp }).promise;
+        out.push(await toBlob(c)); page.cleanup(); onProgress(out.length, doc.numPages);
+      }
+      doc.destroy();
+    } else if (/^image\//.test(f.type) || /\.(jpe?g|png|heic|webp)$/i.test(f.name)) {
+      const url = URL.createObjectURL(f);
+      try {
+        const im = await loadImage(url);
+        const k = Math.min(1, 1600 / Math.max(im.naturalWidth, im.naturalHeight));
+        const c = document.createElement("canvas"); c.width = Math.round(im.naturalWidth * k); c.height = Math.round(im.naturalHeight * k);
+        const g = c.getContext("2d"); g.fillStyle = "#fff"; g.fillRect(0, 0, c.width, c.height); g.drawImage(im, 0, 0, c.width, c.height);
+        out.push(await toBlob(c)); onProgress(out.length, files.length);
+      } finally { URL.revokeObjectURL(url); }
+    }
+  }
+  return out;
+}
+export function blobToDataURL(blob) { return new Promise((ok, no) => { const r = new FileReader(); r.onload = () => ok(r.result); r.onerror = no; r.readAsDataURL(blob); }); }
+export async function shrinkBlob(blob, max = 1200, q = 0.6) {
+  const url = URL.createObjectURL(blob);
+  try { const im = await loadImage(url); return toJpeg(im, im.naturalWidth, im.naturalHeight, max, q); }
+  finally { URL.revokeObjectURL(url); }
+}
+
+// 쪽 읽기 요청 (최대 8쪽씩)
+export async function requestIdentify({ store, images, roster, grade, round, offset = 0 }) {
+  const cfg = window.APP_CONFIG;
+  if (!cfg.workerUrl) { await new Promise(r => setTimeout(r, 500)); return demoIdentify(images.length, roster, grade, round, offset); }
+  const res = await fetch(cfg.workerUrl.replace(/\/$/, "") + "/identify", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: "Bearer " + await store.idToken() },
+    body: JSON.stringify({ images: images.map(d => d.split(",")[1]), roster, grade: grade || 0, round: round || 0 })
+  });
+  const j = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(j.error || `분석 서버 오류 (${res.status})`);
+  return (j.pages || []).map(p => ({ ...p, index: (+p.index || 1) - 1 + offset }));
+}
+function demoIdentify(n, roster, grade, round, offset) {
+  const list = roster.filter(s => !grade || s.grade === grade);
+  const out = [];
+  for (let i = 0; i < n; i++) {
+    const pg = offset + i, gi = Math.floor(pg / 3), within = pg % 3, s = list[gi % Math.max(1, list.length)];
+    const fuzzy = gi % 7 === 2;
+    out.push({ index: pg, blank: false, name_read: s ? (fuzzy ? s.name.slice(0, -1) + "?" : s.name) : "", student_id: s && !fuzzy ? s.id : "",
+      candidates: fuzzy && s ? [s.id, list[(gi + 1) % list.length].id] : [], grade: s ? s.grade : 0, round: round || 4, first_item: [1, 4, 8][within] });
+  }
+  return out;
 }

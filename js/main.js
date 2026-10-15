@@ -1,9 +1,10 @@
 // 수행평가·서술형 프로그램 관리 앱
-import { createStore, DEMO, newToken } from "./store.js?v=2";
-import { UNITS } from "./rubric.js";
-import { rubricFor, filesToJpegs, requestAnalysis, requestComment, ERROR_TYPES } from "./analyze.js";
-import { buildReport, renderReport, reportToBlob, classAverages, takenRounds, PARTS, esc, fmt, unitBr } from "./report.js";
-import { parseWorkbook } from "./excel-import.js";
+import { createStore, DEMO, newToken } from "./store.js?v=3";
+import { UNITS } from "./rubric.js?v=3";
+import { rubricFor, filesToJpegs, requestAnalysis, requestComment, ERROR_TYPES } from "./analyze.js?v=3";
+import { buildReport, renderReport, reportToBlob, classAverages, takenRounds, PARTS, esc, fmt, unitBr } from "./report.js?v=3";
+import { parseWorkbook } from "./excel-import.js?v=3";
+import { viewBulk } from "./bulk.js?v=3";
 
 const CFG = window.APP_CONFIG;
 const $ = (s, el = document) => el.querySelector(s);
@@ -17,7 +18,8 @@ const md = d => d ? `${+d.slice(5, 7)}/${+d.slice(8, 10)}` : "";
 const isAdmin = () => S.user && S.user.role === "admin";
 const stu = id => S.students.find(s => s.id === id);
 const recs = id => S.records[id] || {};
-const scored = x => x && typeof x.score === "number" && x.status !== "결시";
+// AI가 채운 점수(aiScore)는 선생님 확인 전이라 평균·리포트에서 뺀다
+const scored = x => x && typeof x.score === "number" && x.status !== "결시" && !x.aiScore;
 
 function toast(msg, ms = 2400) {
   let t = $("#toast"); if (!t) { t = document.createElement("div"); t.id = "toast"; t.className = "toast"; t.setAttribute("role", "status"); document.body.appendChild(t); }
@@ -71,7 +73,7 @@ function renderChrome() {
   $("#topbar").hidden = false; $("#botnav").hidden = false;
 }
 function markNav(h) {
-  const base = h.startsWith("#/s/") || h.startsWith("#/a/") || h === "#/" || h === "" ? "#/" : h.startsWith("#/r/") ? "#/reports" : h.split("?")[0];
+  const base = h.startsWith("#/s/") || h.startsWith("#/a/") || h.startsWith("#/bulk") || h === "#/" || h === "" ? "#/" : h.startsWith("#/r/") ? "#/reports" : h.split("?")[0];
   $$("#topnav a, #botnav a").forEach(a => a.getAttribute("href") === base ? a.setAttribute("aria-current", "page") : a.removeAttribute("aria-current"));
 }
 // 다른 곳에서 데이터가 바뀌면 지금 보는 목록·현황 화면을 조용히 다시 그린다 (입력 중일 때는 건너뜀)
@@ -88,7 +90,7 @@ function softRefresh() {
 }
 function route(soft = false) {
   const h = location.hash || "#/";
-  markNav(h); if (!soft) { closeSheet(); window.scrollTo(0, 0); }
+  markNav(h); main.onclick = null; if (!soft) { closeSheet(); window.scrollTo(0, 0); }
   const p = h.slice(2).split("/");
   if (p[0] === "s" && stu(p[1])) return viewStudent(p[1], p[2] && !soft ? +p[2] : null);
   if (p[0] === "a" && stu(p[1])) return viewAnalysis(p[1], +p[2]);
@@ -96,6 +98,7 @@ function route(soft = false) {
   if (p[0] === "reports") return viewReports();
   if (p[0] === "r" && stu(p[1])) return viewReport(p[1], +(p[2] ?? 1));
   if (p[0] === "admin" && isAdmin()) return viewAdmin();
+  if (p[0] === "bulk") return viewBulk({ S, main, $, $$, toast, busy, recs, stu, today, newToken });
   return viewList();
 }
 
@@ -127,7 +130,8 @@ function viewList() {
   const q = f.q.trim();
   let list = S.students.filter(s => (!f.mine || s.teacher === S.user.name) && (!f.grade || s.grade === f.grade) && (!q || s.name.includes(q) || (s.school || "").includes(q)));
   list.sort((a, b) => (a.status !== "재원") - (b.status !== "재원") || lastAt(b.id) - lastAt(a.id) || a.name.localeCompare(b.name, "ko"));
-  main.innerHTML = `<div class="page-head"><h1>점수 입력</h1><span class="sp"></span><span class="muted small">${list.length}명</span></div>
+  const nPend = S.students.filter(s => !f.mine || s.teacher === S.user.name).reduce((a, s) => a + Object.values(recs(s.id)).filter(x => x && x.pending).length, 0);
+  main.innerHTML = `<div class="page-head"><h1>점수 입력</h1><span class="sp"></span><a class="btn sm" href="#/bulk">시험지 일괄 올리기${nPend ? ` <span class="pill gold num">확인 대기 ${nPend}</span>` : ""}</a><span class="muted small">${list.length}명</span></div>
     <div class="list-tools">
       <input class="input" id="q" type="search" placeholder="학생 이름·학교 검색" value="${esc(f.q)}" aria-label="학생 검색" autocomplete="off">
       <div class="chips" id="fchips">
@@ -161,8 +165,8 @@ function viewStudent(id, openRound) {
     <div class="rounds">${UNITS[g].map((u, i) => {
       const k = i + 1, x = r[k];
       const cls = !x && k === nx ? "todo" : !x ? "empty" : "";
-      const right = !x ? (k === nx ? `<span class="sc">+ 입력</span>` : "") : x.status === "결시" ? `<span class="pill">결시</span>` : x.status === "채점불가" ? `<span class="pill">채점불가</span>` : `<span class="sc num">${fmt(x.score)}${x.analyzed ? '<small style="color:var(--gold)">분석 완료</small>' : ""}</span>`;
-      const sub = x ? `<small class="num">${md(x.date)}${x.guess ? ' · <span style="color:var(--warn)">회차 확인 필요</span>' : ""}</small>` : "";
+      const right = !x ? (k === nx ? `<span class="sc">+ 입력</span>` : "") : x.status === "결시" ? `<span class="pill">결시</span>` : x.status === "채점불가" ? `<span class="pill">채점불가</span>` : `<span class="sc num">${fmt(x.score)}${x.aiScore ? '<small style="color:var(--warn)">AI 점수</small>' : x.pending ? '<small style="color:var(--warn)">확인 대기</small>' : x.analyzed ? '<small style="color:var(--gold)">분석 완료</small>' : ""}</span>`;
+      const sub = x ? `<small class="num">${md(x.date)}${x.guess ? ' · <span style="color:var(--warn)">회차 확인 필요</span>' : ""}${x.pending ? ' · <span style="color:var(--warn)">분석 확인 대기</span>' : ""}</small>` : "";
       return `<button class="rnd ${cls}" data-r="${k}"><span class="no">${k}회</span><span class="u">${unitBr(g, k)}${sub}</span>${right}</button>`;
     }).join("")}</div>
     <div class="stu-actions"><a class="btn" href="#/r/${id}/1">리포트 보기</a></div>
@@ -282,7 +286,7 @@ async function viewAnalysis(id, k) {
   const unit = UNITS[g][k - 1];
   const A = { images: [], result: null, saved: null, edit: false };
   main.innerHTML = `<div class="stu-head"><a class="back" href="#/s/${id}" aria-label="학생으로">‹</a>
-      <div style="flex:1;min-width:0"><h1>${k}회 ${esc(unit)}</h1><div class="meta">${esc(s.name)} · ${esc(s.school)} 중${g} · 입력 점수 <b class="num">${scored(x) ? fmt(x.score) : "없음"}</b></div></div></div>
+      <div style="flex:1;min-width:0"><h1>${k}회 ${esc(unit)}</h1><div class="meta">${esc(s.name)} · ${esc(s.school)} 중${g} · 입력 점수 <b class="num">${scored(x) ? fmt(x.score) : x && x.aiScore ? `AI ${fmt(x.score)} (확인 전)` : "없음"}</b></div></div></div>
     <div class="ana">
       <div>
         <div class="drop" id="drop"><b>채점된 시험지 올리기</b><span>사진·스캔(PDF)을 여러 장 올릴 수 있어요</span>
@@ -329,10 +333,11 @@ async function viewAnalysis(id, k) {
     R.items.forEach(it => { if (it.steps && it.steps.length) it.score = it.steps.reduce((a, st) => a + (+st.got || 0), 0); });
     R.total = R.items.reduce((a, it) => a + it.score, 0);
     const ent = scored(x) ? x.score : null, diff = ent == null ? null : R.total - ent;
+    const aiNote = x && x.aiScore ? `<div class="overall" style="color:var(--warn)">이 회차는 앱에 입력된 점수가 없어 AI 판독 점수를 넣어 두었어요. 문항 점수를 확인하고 저장하면 판독 합계(${fmt(R.total)}점)가 회차 점수로 확정됩니다.</div>` : "";
     $("#res").innerHTML = `<div class="check"><b>판독 합계 <span class="num">${fmt(R.total)}</span> / 입력 점수 <span class="num">${ent == null ? "없음" : fmt(ent)}</span></b>
         ${diff == null ? "" : Math.abs(diff) < 0.01 ? '<span class="ok">일치</span>' : `<span class="diff">${diff > 0 ? "+" : ""}${fmt(diff)}점 차이</span><span class="small muted">입력 점수가 기준입니다. 필요하면 문항 점수를 고치거나 회차 점수를 수정하세요.</span>`}
-        <span style="margin-left:auto">${A.saved && !ed ? `<span class="pill good">확인 완료</span>` : `<span class="pill gold">확인 전</span>`}</span></div>
-      ${R.overall ? `<div class="overall">${esc(R.overall)}</div>` : ""}
+        <span style="margin-left:auto">${A.saved && A.saved.confirmed && !ed ? `<span class="pill good">확인 완료</span>` : `<span class="pill gold">확인 전</span>`}</span></div>
+      ${aiNote}${R.overall ? `<div class="overall">${esc(R.overall)}</div>` : ""}
       <ul class="items">${R.items.map((it, i) => {
         const rb = rubric[i] || {}, c = it.score === 5 ? "o" : it.score === 0 ? "x" : "p";
         return `<li class="item ${ed && it.score < 5 ? "open" : ""}" data-i="${i}"><button class="hd" type="button" aria-expanded="${ed && it.score < 5}"><span>${String(it.no).padStart(2, "0")}번</span><span class="num"><b>${fmt(it.score)}</b> / 5</span><span class="mk ${c}">${c === "o" ? "○" : c === "x" ? "×" : "△"}</span><span>${it.error_type && it.score < 5 ? `<span class="etag">${esc(it.error_type)}</span>` : ""}<span class="memo">${esc(it.memo || (it.score === 5 ? "채점기준 전 단계 충족" : ""))}</span>${it.unclear ? '<span class="unclear">글씨 판독 어려움</span>' : ""}</span><span class="chev">›</span></button>
@@ -341,7 +346,7 @@ async function viewAnalysis(id, k) {
             ${ed ? `<div class="edit"><select class="input" data-et="${i}" aria-label="오류 유형"><option value="">오류 유형 없음</option>${ERROR_TYPES.map(t => `<option ${it.error_type === t ? "selected" : ""}>${t}</option>`).join("")}</select><input class="input" data-memo="${i}" value="${esc(it.memo)}" placeholder="메모 (부모님 리포트에는 나가지 않아요)"></div>` : ""}
           </div></li>`;
       }).join("")}</ul>
-      <div class="ana-foot">${ed ? `<button class="btn fill" id="confirm">확인하고 저장</button>${A.saved ? `<button class="btn" id="cancel">취소</button>` : ""}` : `<button class="btn" id="redit">판독 수정</button>`}<span class="small muted">${A.saved && A.saved.by ? `확인: ${esc(String(A.saved.by).split("@")[0])}` : ""}</span></div>`;
+      <div class="ana-foot">${ed ? `<button class="btn fill" id="confirm">확인하고 저장</button>${A.saved && A.saved.confirmed ? `<button class="btn" id="cancel">취소</button>` : ""}` : `<button class="btn" id="redit">판독 수정</button>`}<span class="small muted">${A.saved && A.saved.by ? `확인: ${esc(String(A.saved.by).split("@")[0])}` : ""}</span></div>`;
   }
   $("#res").addEventListener("click", e => {
     const h = e.target.closest(".hd"); if (h) { const li = h.parentElement; li.classList.toggle("open"); h.setAttribute("aria-expanded", li.classList.contains("open")); return; }
@@ -358,10 +363,12 @@ async function viewAnalysis(id, k) {
   async function confirmSave(btn) {
     busy(btn, true, "저장 중");
     try {
-      const a = { ...A.result, entered: scored(x) ? x.score : null, confirmed: true, by: S.user.email, at: Date.now() };
+      const cur = recs(id)[k];
+      const a = { ...A.result, entered: cur && cur.aiScore ? A.result.total : (scored(cur) ? cur.score : null), confirmed: true, pending: false, by: S.user.email, at: Date.now() };
       await S.store.saveAnalysis(id, k, a);
       if (A.images.length && (!A.saved || A.imagesChanged !== false)) await S.store.saveScans(id, k, A.images);
-      const rec = { ...(recs(id)[k] || { date: today(), status: "응시", score: null }), analyzed: true };
+      const rec = { ...(cur || { date: today(), status: "응시", score: null }), analyzed: true, pending: false };
+      if (!cur || cur.aiScore || cur.score == null) { rec.score = A.result.total; rec.aiScore = false; rec.status = "응시"; }
       await S.store.saveRound(id, k, rec, S.user.email);
       S.records[id] = { ...recs(id), [k]: { ...rec, by: S.user.email, at: Date.now() } };
       A.saved = JSON.parse(JSON.stringify(a)); A.edit = false; paintResult(); paintThumbs();
@@ -371,7 +378,7 @@ async function viewAnalysis(id, k) {
 
   // 기존 결과·스캔 불러오기, 또는 입력 화면에서 넘어온 사진
   const [saved, scans] = await Promise.all([S.store.getAnalysis(id, k), S.store.getScans(id, k).catch(() => [])]);
-  if (saved) { A.saved = saved; A.result = JSON.parse(JSON.stringify(saved)); A.images = scans; paintResult(); }
+  if (saved) { A.saved = saved; A.result = JSON.parse(JSON.stringify(saved)); A.images = scans; A.edit = !saved.confirmed; paintResult(); }
   if (S.pending && S.pending.id === id && S.pending.k === k) { const f = S.pending.files; S.pending = null; A.images = []; await add(f); if (!saved) $("#go").click(); }
   paintThumbs();
 }
@@ -387,9 +394,10 @@ function viewOverview() {
     const cells = Array.from({ length: 10 }, (_, i) => {
       const k = i + 1, x = r[k];
       if (!x) return `<td class="c" data-s="${s.id}" data-r="${k}"></td>`;
+      if (x.aiScore && typeof x.score === "number") return `<td class="c ai pd" data-s="${s.id}" data-r="${k}" title="AI 판독 점수 · 확인 전">${fmt(x.score)}</td>`;
       if (!scored(x)) return `<td class="c st" data-s="${s.id}" data-r="${k}">${x.status}</td>`;
       v.push(x.score); cs[k] += x.score; cn[k]++;
-      return `<td class="c ${x.score >= 40 ? "hi" : x.score < 25 ? "lo" : ""} ${x.analyzed ? "an" : ""} ${x.guess ? "gs" : ""}" data-s="${s.id}" data-r="${k}" title="${md(x.date)}">${fmt(x.score)}</td>`;
+      return `<td class="c ${x.score >= 40 ? "hi" : x.score < 25 ? "lo" : ""} ${x.analyzed ? "an" : ""} ${x.pending ? "pd" : ""} ${x.guess ? "gs" : ""}" data-s="${s.id}" data-r="${k}" title="${md(x.date)}">${fmt(x.score)}</td>`;
     }).join("");
     return `<tr class="${s.status !== "재원" ? "off" : ""}"><td class="n"><a href="#/s/${s.id}">${esc(s.name)}<small>${esc(s.school)}</small></a></td><td>${esc(s.teacher || "")}</td>${cells}<td><b>${v.length ? fmt(v.reduce((a, b) => a + b, 0) / v.length) : ""}</b></td><td class="num">${v.length}</td></tr>`;
   }).join("");
@@ -404,7 +412,7 @@ function viewOverview() {
     <div class="tblwrap"><table class="ov num"><thead><tr><th style="text-align:left">학생</th><th>담당</th>${UNITS[g].map((u, i) => `<th><b>${i + 1}회</b>${unitBr(g, i + 1)}</th>`).join("")}<th>평균</th><th>응시</th></tr></thead>
       <tbody>${rows || `<tr><td colspan="14" class="empty-state">해당하는 학생이 없습니다.</td></tr>`}</tbody>
       <tfoot><tr><td class="n">회차 평균</td><td></td>${cs.slice(1).map((c, i) => `<td>${cn[i + 1] ? fmt(c / cn[i + 1]) : ""}</td>`).join("")}<td></td><td></td></tr></tfoot></table></div>
-    <div class="legend"><span>칸을 누르면 바로 입력·수정</span><span><span style="color:var(--good)">■</span> 40점 이상</span><span><span style="color:var(--bad)">■</span> 25점 미만</span><span><span style="color:var(--gold)">●</span> 시험지 분석 완료</span><span><span style="color:var(--warn)">┅</span> 엑셀에서 회차를 추정한 칸 (확인 필요)</span><span>회차 평균은 응시한 학생만으로 계산</span></div>`;
+    <div class="legend"><span>칸을 누르면 바로 입력·수정</span><span><span style="color:var(--good)">■</span> 40점 이상</span><span><span style="color:var(--bad)">■</span> 25점 미만</span><span><span style="color:var(--gold)">●</span> 시험지 분석 완료</span><span><span style="color:var(--warn)">┅</span> 엑셀에서 회차를 추정한 칸 (확인 필요)</span><span><span style="color:var(--warn)">○</span> 분석 확인 대기</span><span><i>기울임</i> AI 점수 (확인 전, 평균에서 제외)</span><span>회차 평균은 응시한 학생만으로 계산</span></div>`;
   $("#gch").onclick = e => { const b = e.target.closest("button"); if (b) { o.grade = +b.dataset.g; viewOverview(); } };
   $("#tsel").onchange = e => { o.teacher = e.target.value; viewOverview(); };
   $("#ssel").onchange = e => { o.status = e.target.value; viewOverview(); };
