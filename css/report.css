@@ -78,3 +78,7 @@
   .r-cmt p{font-size:14px}
   .heat .c{font-size:9px}
 }
+/* 시험지 분석이 없을 때: 그래프와 표를 한 줄씩 넓게 */
+.r-one{display:flex;flex-direction:column;gap:18px}
+.r-one .r-tbl{font-size:13px}
+.r-one .r-tbl td{padding:7px 8px}

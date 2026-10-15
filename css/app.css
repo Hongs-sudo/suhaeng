@@ -258,3 +258,26 @@ table.bk-tbl .bk-sel{padding:5px 6px;font-size:13px;min-width:150px}
 .bk-prog a.queued,.bk-prog a.upload{color:var(--muted)}
 table.ov td.pd{outline:1.5px dotted var(--warn);outline-offset:-4px}
 table.ov td.ai{font-style:italic;color:var(--muted)}
+
+/* 로고 (다크 모드에서는 흰 칩 위에) */
+.brand{flex-direction:row;align-items:center;gap:10px}
+.brand-logo{display:flex;align-items:center;background:#fff;border-radius:8px;padding:3px 6px}
+.brand-logo img{height:26px;width:auto;display:block}
+.brand-t{display:flex;flex-direction:column;line-height:1.15}
+@media (max-width:520px){.brand-t small{display:none}.brand-logo img{height:22px}}
+
+/* 리포트: 선생님 → 학생 고르기, 차시 정하기 */
+.rp-pick{display:grid;grid-template-columns:auto minmax(0,220px) auto minmax(0,1fr);gap:8px 10px;align-items:center;margin-bottom:12px}
+@media (max-width:640px){.rp-pick{grid-template-columns:1fr}}
+a.rp-row{color:var(--ink);text-decoration:none}
+.chips button.add{border-style:dashed}
+.pgrid{display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-top:8px}
+@media (max-width:420px){.pgrid{grid-template-columns:1fr}}
+.pgrid label{display:grid;grid-template-columns:18px 34px minmax(0,1fr);grid-template-rows:auto auto;column-gap:6px;align-items:center;border:1px solid var(--line);border-radius:8px;padding:6px 8px;font-size:12.5px;cursor:pointer;margin:0;color:var(--ink)}
+.pgrid label small{grid-column:2/4;color:var(--muted);font-size:11px}
+.pgrid label b{color:var(--green)}
+.pgrid label span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.pgrid label.on{border-color:var(--green);background:var(--green-soft)}
+.pgrid label.other{opacity:.7}
+.pgrid label.none{opacity:.4;cursor:default}
+.tgl{display:flex!important;align-items:center;gap:8px;font-size:14px!important;color:var(--ink)!important;margin:0 0 6px!important}

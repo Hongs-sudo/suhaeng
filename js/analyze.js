@@ -1,5 +1,5 @@
 // 시험지 스캔 처리 + 분석 서버 호출
-import { RUBRIC, UNITS } from "./rubric.js?v=3";
+import { RUBRIC, UNITS } from "./rubric.js?v=4";
 
 export const ERROR_TYPES = ["개념 이해", "조건 해석", "계산 실수", "풀이 과정 서술", "미응답"];
 

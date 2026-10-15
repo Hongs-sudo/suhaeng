@@ -1,10 +1,10 @@
 // 수행평가·서술형 프로그램 관리 앱
-import { createStore, DEMO, newToken } from "./store.js?v=3";
-import { UNITS } from "./rubric.js?v=3";
-import { rubricFor, filesToJpegs, requestAnalysis, requestComment, ERROR_TYPES } from "./analyze.js?v=3";
-import { buildReport, renderReport, reportToBlob, classAverages, takenRounds, PARTS, esc, fmt, unitBr } from "./report.js?v=3";
-import { parseWorkbook } from "./excel-import.js?v=3";
-import { viewBulk } from "./bulk.js?v=3";
+import { createStore, DEMO, newToken } from "./store.js?v=4";
+import { UNITS } from "./rubric.js?v=4";
+import { rubricFor, filesToJpegs, requestAnalysis, requestComment, ERROR_TYPES } from "./analyze.js?v=4";
+import { buildReport, renderReport, reportToBlob, reportToHTML, classAverages, takenRounds, defaultParts, esc, fmt, unitBr } from "./report.js?v=4";
+import { parseWorkbook } from "./excel-import.js?v=4";
+import { viewBulk } from "./bulk.js?v=4";
 
 const CFG = window.APP_CONFIG;
 const $ = (s, el = document) => el.querySelector(s);
@@ -53,7 +53,7 @@ async function loadAll() {
   const [st, rc, th] = await Promise.all([S.store.listStudents(), S.store.listRecords(), S.store.listTeachers().catch(() => [])]);
   S.students = st.sort((a, b) => a.grade - b.grade || a.name.localeCompare(b.name, "ko"));
   S.records = rc; S.teachers = th;
-  if (S.filter.mine == null) S.filter.mine = !isAdmin() && S.students.some(s => s.teacher === S.user.name);
+  if (S.filter.mine == null) S.filter.mine = S.students.some(s => s.teacher === S.user.name);
 }
 window.addEventListener("hashchange", () => S.user && S.user.registered && route());
 
@@ -96,7 +96,7 @@ function route(soft = false) {
   if (p[0] === "a" && stu(p[1])) return viewAnalysis(p[1], +p[2]);
   if (p[0] === "overview") return viewOverview();
   if (p[0] === "reports") return viewReports();
-  if (p[0] === "r" && stu(p[1])) return viewReport(p[1], +(p[2] ?? 1));
+  if (p[0] === "r" && stu(p[1])) return viewReport(p[1], p[2] === "all" ? "all" : +(p[2] ?? 0));
   if (p[0] === "admin" && isAdmin()) return viewAdmin();
   if (p[0] === "bulk") return viewBulk({ S, main, $, $$, toast, busy, recs, stu, today, newToken });
   return viewList();
@@ -439,114 +439,192 @@ async function downloadExcel(g, list) {
   XLSX.writeFile(wb, `수행평가_중${g}_${today()}.xlsx`);
 }
 
-/* ================================================================ 리포트 목록 */
+/* ================================================================ 리포트 목록: 선생님 → 담당 학생 */
 function viewReports() {
-  const f = S.filter;
-  const list = S.students.filter(s => (!f.mine || s.teacher === S.user.name) && (!f.grade || s.grade === f.grade) && s.status === "재원");
+  const R = S.rp = S.rp || { teacher: null, q: "" };
+  if (R.teacher == null) R.teacher = S.students.some(s => s.teacher === S.user.name) ? S.user.name : "";
+  const q = R.q.trim();
+  const list = S.students.filter(s => s.status === "재원" && (!R.teacher || s.teacher === R.teacher) && (!q || s.name.includes(q) || (s.school || "").includes(q)))
+    .sort((a, b) => a.grade - b.grade || a.name.localeCompare(b.name, "ko"));
   main.innerHTML = `<div class="page-head"><h1>부모님 리포트</h1></div>
-    <div class="list-tools"><div class="chips" id="fchips"><button data-mine="1" aria-pressed="${!!f.mine}">내 학생</button><button data-mine="0" aria-pressed="${!f.mine}">전체</button>${[0, 1, 2, 3].map(g => `<button data-g="${g}" aria-pressed="${f.grade === g}">${g ? "중" + g : "전 학년"}</button>`).join("")}</div>
-    <p class="small muted" style="margin:0">리포트는 응시한 날짜 순서대로 묶습니다. 1차 = 처음 응시한 5회, 2차 = 그다음 5회. 회차 번호 순서와 달라도 괜찮습니다.</p></div>
+    <div class="rp-pick">
+      <label class="small muted" for="rteach">선생님</label>
+      <select class="input" id="rteach"><option value="">전체 선생님</option>${teacherNames().map(n => `<option value="${esc(n)}" ${R.teacher === n ? "selected" : ""}>${esc(n)}${n === S.user.name ? " (나)" : ""}</option>`).join("")}</select>
+      <label class="small muted" for="rq">담당 학생</label>
+      <input class="input" id="rq" type="search" placeholder="이름·학교로 찾기 (엔터: 첫 학생 열기)" value="${esc(R.q)}" autocomplete="off">
+    </div>
     <div class="rp-list">${list.map(s => {
-      const t = takenRounds(recs(s.id)), an = t.filter(x => x.analyzed).length;
-      return `<div class="card rp-row"><div><b>${esc(s.name)}</b> <span class="small muted">${esc(s.school)} · 중${s.grade} · ${esc(s.teacher || "")}</span><div class="small muted">응시 ${t.length}회 · 시험지 분석 ${an}회</div></div>
-        <div class="btns"><a class="btn sm ${t.length >= 5 ? "fill" : ""}" href="#/r/${s.id}/1" ${t.length ? "" : 'aria-disabled="true" style="opacity:.4;pointer-events:none"'}>1차</a><a class="btn sm ${t.length >= 10 ? "fill" : ""}" href="#/r/${s.id}/2" ${t.length > 5 ? "" : 'aria-disabled="true" style="opacity:.4;pointer-events:none"'}>2차</a></div></div>`;
+      const t = takenRounds(recs(s.id)), an = Object.values(recs(s.id)).filter(x => x && x.analyzed).length;
+      return `<a class="card rp-row" href="#/r/${s.id}/0"><div><b>${esc(s.name)}</b> <span class="small muted">${esc(s.school)} · 중${s.grade}${R.teacher ? "" : " · " + esc(s.teacher || "")}</span><div class="small muted num">응시 ${t.length}회 · 시험지 분석 ${an}회</div></div><span class="btn sm">리포트 열기</span></a>`;
     }).join("") || `<div class="empty-state">해당하는 학생이 없습니다.</div>`}</div>`;
-  $("#fchips").onclick = e => { const b = e.target.closest("button"); if (!b) return; if (b.dataset.mine) f.mine = b.dataset.mine === "1"; if (b.dataset.g) f.grade = +b.dataset.g; viewReports(); };
+  $("#rteach").onchange = e => { R.teacher = e.target.value; viewReports(); };
+  const qi = $("#rq");
+  qi.oninput = () => { R.q = qi.value; const pos = qi.selectionStart; viewReports(); const n = $("#rq"); n.focus(); n.setSelectionRange(pos, pos); };
+  qi.onkeydown = e => { if (e.key === "Enter" && list[0]) location.hash = `#/r/${list[0].id}/0`; };
 }
 
-/* ================================================================ 리포트 만들기 */
+/* ================================================================ 리포트 만들기: 차시 정하기 · 의견 · 보내기 */
 const reportBase = () => location.href.split("#")[0].replace(/index\.html$/, "").replace(/[^/]*$/, "");
-async function viewReport(id, part) {
+async function viewReport(id, pi) {
   const s = stu(id);
   main.innerHTML = `<div class="empty-state"><span class="spinner"></span> 리포트를 준비하고 있어요</div>`;
-  const key = `${id}_${part}`;
-  const [analyses, draft, fresh] = await Promise.all([S.store.listAnalyses(id), S.store.getDraft(key), S.store.getRecord(id).catch(() => null)]);
-  if (fresh) S.records[id] = fresh; // 리포트는 항상 서버의 최신 점수로 만든다
+  const key = `${id}_parts`;
+  const [analyses, saved, fresh] = await Promise.all([S.store.listAnalyses(id), S.store.getDraft(key), S.store.getRecord(id).catch(() => null)]);
+  if (fresh) S.records[id] = fresh;
+  const rounds = recs(id);
+  const blank = () => ({ comments: { strengths: "", improve: "", plan: "" }, showComments: true, token: null });
+  const P = saved && Array.isArray(saved.parts) && saved.parts.length
+    ? { size: saved.size || 5, parts: saved.parts, all: saved.all || blank() }
+    : { size: 5, parts: defaultParts(rounds, 5).map(p => ({ ...blank(), ...p })), all: blank() };
+  P.parts.forEach(p => { p.comments = { strengths: "", improve: "", plan: "", ...(p.comments || {}) }; if (p.showComments == null) p.showComments = true; });
+  const isAll = pi === "all";
+  const idx = isAll ? -1 : Math.max(0, Math.min(+pi || 0, P.parts.length - 1));
+  const cur = () => isAll ? { label: "전체", rounds: takenRounds(rounds).map(x => x.round), ...P.all } : P.parts[idx];
+  const curObj = () => isAll ? P.all : P.parts[idx];
   const avgs = classAverages(S.students, S.records);
-  const D = { comments: { strengths: "", improve: "", plan: "", ...(draft?.comments || {}) }, token: draft?.token || null };
-  const build = () => buildReport({ student: s, rounds: recs(id), analyses, avgs, part, comments: D.comments, cfg: CFG });
-  let data = build();
-  const t = takenRounds(recs(id));
+  const build = () => { const c = cur(); return buildReport({ student: s, rounds, analyses, avgs, selection: c.rounds, label: c.label, comments: c.comments, showComments: c.showComments, cfg: CFG }); };
+  let saveT = null;
+  const persist = (now = false) => {
+    clearTimeout(saveT);
+    const go = () => S.store.saveDraft(key, { size: P.size, parts: P.parts, all: P.all, by: S.user.email, at: Date.now() }).then(() => { const m = $("#psaved"); if (m) m.textContent = "저장됨"; }).catch(e => toast("저장하지 못했습니다: " + e.message, 4000));
+    const m = $("#psaved"); if (m) m.textContent = "저장 중…";
+    if (now) return go(); saveT = setTimeout(go, 600);
+  };
   const canShare = !!(navigator.canShare && navigator.share);
-  main.innerHTML = `<div class="stu-head"><a class="back" href="#/reports" aria-label="리포트 목록">‹</a><div style="flex:1;min-width:0"><h1>${esc(s.name)} 리포트</h1><div class="meta">${esc(s.school)} · 중${s.grade} · 응시 ${t.length}회</div></div></div>
+  const t = takenRounds(rounds);
+  main.innerHTML = `<div class="stu-head"><a class="back" href="#/reports" aria-label="리포트 목록">‹</a><div style="flex:1;min-width:0"><h1>${esc(s.name)} 리포트</h1><div class="meta">${esc(s.school)} · 중${s.grade} · 담당 ${esc(s.teacher || "")} · 응시 ${t.length}회</div></div><span class="small muted" id="psaved"></span></div>
     <div class="rp-layout">
       <div class="preview" id="pv"><div class="scale" id="sc"></div></div>
       <div class="rp-side">
-        <div class="card"><h3>리포트 범위</h3><div class="chips" id="parts">${[1, 2, 0].map(p => `<button data-p="${p}" aria-pressed="${p === part}">${p === 0 ? "전체" : p + "차"}</button>`).join("")}</div>
-          <p class="small muted" style="margin:8px 0 0">${esc(PARTS[part])} · 이번 리포트 회차: ${data.rows.map(r => r.round + "회").join(", ") || "없음"}</p></div>
+        <div class="card"><h3>차시 정하기</h3>
+          <div class="chips" id="parts">${P.parts.map((p, i) => `<button data-p="${i}" aria-pressed="${i === idx}">${esc(p.label)}</button>`).join("")}<button data-add="1" class="add">+ 차시 추가</button><button data-p="all" aria-pressed="${isAll}">전체</button></div>
+          ${isAll ? `<p class="small muted" style="margin:8px 0 0">응시한 모든 회차(${t.map(x => x.round).sort((a, b) => a - b).join("·") || "없음"}회)를 회차 순서로 보여 줘요.</p>` : `
+          <div class="row" style="display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin-top:8px"><label class="small muted" for="psize">자동으로 고를 회차 수</label>
+            <select id="psize" class="input" style="width:auto;padding:5px 8px">${[2, 3, 4, 5, 6, 7, 8, 10].map(n => `<option ${P.size === n ? "selected" : ""}>${n}</option>`).join("")}</select>
+            <button class="btn sm" id="pauto">자동으로 다시 고르기</button></div>
+          <p class="small muted" style="margin:6px 0 0">체크한 회차가 ${esc(cur().label)} 리포트에 들어가요. 리포트에는 회차 번호 순서로 나오고, 날짜는 선생님 화면에만 보여요.</p>
+          <div class="pgrid num" id="pgrid">${Array.from({ length: 10 }, (_, i) => {
+            const r = i + 1, x = rounds[r], ok = x && typeof x.score === "number" && x.status !== "결시" && !x.aiScore;
+            const on = cur().rounds.includes(r), other = P.parts.findIndex((p, j) => j !== idx && p.rounds.includes(r));
+            const note = !x ? "미응시" : x.status === "결시" ? "결시" : x.aiScore ? "AI 점수 확인 전" : !ok ? x.status : `${md(x.date)}${other >= 0 ? " · " + esc(P.parts[other].label) : ""}`;
+            return `<label class="${on ? "on" : other >= 0 ? "other" : ok ? "" : "none"}"><input type="checkbox" data-r="${r}" ${on ? "checked" : ""} ${ok ? "" : "disabled"}><b>${r}회</b><span>${esc(UNITS[s.grade][i])}</span><small>${ok ? fmt(x.score) + "점 · " : ""}${note}</small></label>`;
+          }).join("")}</div>
+          ${(() => { const un = t.map(x => x.round).filter(r => !P.parts.some(p => p.rounds.includes(r))).sort((a, b) => a - b); return un.length ? `<p class="small" style="margin:6px 0 0;color:var(--warn)">아직 어느 차시에도 들어가지 않은 회차: ${un.join("·")}회</p>` : ""; })()}
+          ${P.parts.length > 1 ? `<button class="btn sm danger" id="pdel" style="margin-top:8px">${esc(cur().label)} 삭제</button>` : ""}`}
+        </div>
         <div class="card"><h3>선생님 종합 의견</h3>
-          <button class="btn sm gold" id="ai">점수·분석으로 초안 만들기</button>
-          <label for="c1">잘하고 있어요</label><textarea class="input" id="c1">${esc(D.comments.strengths)}</textarea>
-          <label for="c2">보완할 점</label><textarea class="input" id="c2">${esc(D.comments.improve)}</textarea>
-          <label for="c3">다음 학습 계획</label><textarea class="input" id="c3">${esc(D.comments.plan)}</textarea>
-          <button class="btn sm" id="savec" style="margin-top:8px">의견 저장</button></div>
+          <label class="tgl"><input type="checkbox" id="cshow" ${cur().showComments ? "checked" : ""}> 리포트에 의견 넣기</label>
+          <div id="cbox" ${cur().showComments ? "" : "hidden"}>
+            <button class="btn sm gold" id="ai">점수·분석으로 초안 만들기</button>
+            <label for="c1">잘하고 있어요</label><textarea class="input" id="c1">${esc(cur().comments.strengths)}</textarea>
+            <label for="c2">보완할 점</label><textarea class="input" id="c2">${esc(cur().comments.improve)}</textarea>
+            <label for="c3">다음 학습 계획</label><textarea class="input" id="c3">${esc(cur().comments.plan)}</textarea>
+            <p class="small muted" style="margin:6px 0 0">입력하면 자동으로 저장돼요.</p>
+          </div>
+        </div>
         <div class="card"><h3>보내기</h3><div class="rp-btns">
           <button class="btn fill" id="copy">이미지 복사</button><button class="btn" id="dl">이미지 저장</button>
           ${canShare ? `<button class="btn" id="share" style="grid-column:span 2">카톡·문자로 이미지 보내기</button>` : ""}
-          <button class="btn gold" id="link" style="grid-column:span 2">공유 링크 만들기</button></div>
-          <div id="urlbox" style="margin-top:8px"></div>
-          <p class="small muted" style="margin:8px 0 0">공유 링크는 로그인 없이 이 리포트만 열리며 휴대폰 화면에 맞춰 보입니다. 내용을 고친 뒤에는 링크를 다시 만들어야 반영됩니다(주소는 그대로).</p></div>
+          <button class="btn gold" id="html" style="grid-column:span 2">휴대폰용 HTML 파일 보내기</button></div>
+          <p class="small muted" style="margin:8px 0 0">HTML 파일은 부모님이 열면 휴대폰 화면 폭에 맞춰 보여요. PC에서는 파일로 저장되니 카톡 PC에서 파일 첨부로 보내 주세요.</p>
+          <details style="margin-top:8px"><summary class="small muted">더보기: 공유 링크</summary>
+            <button class="btn sm" id="link" style="margin-top:8px">공유 링크 만들기</button><div id="urlbox" style="margin-top:8px"></div></details>
+        </div>
       </div></div>`;
   const paint = () => {
-    data = build();
-    $("#sc").innerHTML = renderReport(data);
+    $("#sc").innerHTML = renderReport(build());
     const w = $("#pv").clientWidth - 28, k = Math.min(1, w / 794);
     $("#sc").style.transform = `scale(${k})`;
     $("#pv").style.height = ($("#sc").offsetHeight * k + 28) + "px";
   };
   paint(); window.onresize = () => document.body.contains($("#sc")) && paint();
-  const readC = () => { D.comments = { strengths: $("#c1").value.trim(), improve: $("#c2").value.trim(), plan: $("#c3").value.trim() }; };
-  ["#c1", "#c2", "#c3"].forEach(sel => $(sel).oninput = () => { readC(); paint(); });
-  $("#parts").onclick = e => { const b = e.target.closest("button"); if (b) location.hash = `#/r/${id}/${b.dataset.p}`; };
-  $("#savec").onclick = async e => { readC(); busy(e.currentTarget, true); await S.store.saveDraft(key, { comments: D.comments, by: S.user.email, at: Date.now() }); busy(e.currentTarget, false); toast("의견을 저장했어요"); };
+  const go = p => location.hash = `#/r/${id}/${p}`;
+  $("#parts").onclick = async e => {
+    const b = e.target.closest("button"); if (!b) return;
+    if (b.dataset.add) { P.parts.push({ ...blank(), label: `${P.parts.length + 1}차`, rounds: [] }); await persist(true); return go(P.parts.length - 1); }
+    go(b.dataset.p);
+  };
+  const pg = $("#pgrid");
+  if (pg) pg.onchange = e => {
+    const r = +e.target.dataset.r; if (!r) return;
+    const c = P.parts[idx];
+    if (e.target.checked) { P.parts.forEach(p => p.rounds = p.rounds.filter(x => x !== r)); c.rounds = [...c.rounds, r].sort((a, b) => a - b); }
+    else c.rounds = c.rounds.filter(x => x !== r);
+    persist(true).then(() => { const y = window.scrollY; viewReport(id, pi).then(() => window.scrollTo(0, y)); });
+  };
+  const ps = $("#psize"); if (ps) ps.onchange = e => { P.size = +e.target.value; };
+  const pa = $("#pauto"); if (pa) pa.onclick = async () => {
+    if (!confirm(`응시 날짜 순서로 ${P.size}회씩 차시를 다시 나눌까요? 지금 고른 회차 구성은 바뀌고, 써 둔 의견은 차시 순서대로 남습니다.`)) return;
+    const np = defaultParts(rounds, P.size);
+    P.parts = np.map((p, i) => ({ ...blank(), ...(P.parts[i] || {}), label: p.label, rounds: p.rounds }));
+    await persist(true); go(0);
+  };
+  const pd = $("#pdel"); if (pd) pd.onclick = async () => {
+    if (!confirm(`${cur().label}을(를) 삭제할까요? 들어 있던 회차는 '아직 차시에 들어가지 않은 회차'가 됩니다.`)) return;
+    P.parts.splice(idx, 1); P.parts.forEach((p, i) => p.label = `${i + 1}차`); await persist(true); go(0);
+  };
+  // 의견
+  const readC = () => { curObj().comments = { strengths: $("#c1").value.trim(), improve: $("#c2").value.trim(), plan: $("#c3").value.trim() }; };
+  ["#c1", "#c2", "#c3"].forEach(sel => $(sel).oninput = () => { readC(); paint(); persist(); });
+  $("#cshow").onchange = e => { curObj().showComments = e.target.checked; $("#cbox").hidden = !e.target.checked; paint(); persist(); };
   $("#ai").onclick = async e => {
-    if ((D.comments.strengths || D.comments.improve || D.comments.plan) && !confirm("지금 적힌 의견을 초안으로 바꿀까요?")) return;
+    const c = curObj().comments;
+    if ((c.strengths || c.improve || c.plan) && !confirm("지금 적힌 의견을 초안으로 바꿀까요?")) return;
     busy(e.currentTarget, true, "초안 만드는 중");
     try {
-      const best = data.rows.reduce((a, r) => !a || r.score > a.score ? r : a, null);
-      const summary = { grade: s.grade, part, rows: data.rows.map(r => ({ round: r.round, unit: r.unit, score: r.score, classAvg: r.classAvg == null ? null : Math.round(r.classAvg * 10) / 10, items: r.items, errors: r.errs })), avg: data.kpi.avg, classAvg: data.kpi.cavg, errors: data.errors, best: best?.score, bestUnit: best?.unit, topError: data.errors[0]?.[0] || "" };
-      const c = await requestComment({ store: S.store, summary });
-      $("#c1").value = c.strengths || ""; $("#c2").value = c.improve || ""; $("#c3").value = c.plan || "";
-      readC(); paint(); toast("초안을 넣었어요. 읽어 보고 고친 뒤 저장해 주세요.", 3500);
+      const d = build();
+      const best = d.rows.reduce((a, r) => !a || r.score > a.score ? r : a, null);
+      const summary = { grade: s.grade, label: cur().label, rows: d.rows.map(r => ({ round: r.round, unit: r.unit, score: r.score, classAvg: r.classAvg == null ? null : Math.round(r.classAvg * 10) / 10, items: r.items, errors: r.errs })), avg: d.kpi.avg, classAvg: d.kpi.cavg, errors: d.errors, best: best?.score, bestUnit: best?.unit, topError: d.errors[0]?.[0] || "" };
+      const r = await requestComment({ store: S.store, summary });
+      $("#c1").value = r.strengths || ""; $("#c2").value = r.improve || ""; $("#c3").value = r.plan || "";
+      readC(); paint(); persist(true); toast("초안을 넣었어요. 읽어 보고 다듬어 주세요.", 3500);
     } catch (x) { toast(x.message, 5000); }
     busy(e.currentTarget, false);
   };
-  const fname = () => `${s.name}_수행평가_${part === 0 ? "전체" : part + "차"}리포트.png`;
-  const makeBlob = async btn => { busy(btn, true, "이미지 만드는 중"); try { readC(); return await reportToBlob(build()); } finally { busy(btn, false); } };
+  // 보내기
+  const fbase = () => `${s.name}_수행평가_${cur().label}_리포트`;
+  const download = (blob, name) => { const a = document.createElement("a"); a.href = URL.createObjectURL(blob); a.download = name; a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 5000); };
   $("#copy").onclick = async e => {
     const btn = e.currentTarget;
     try {
       if (!window.ClipboardItem || !navigator.clipboard?.write) throw new Error("이 브라우저는 이미지 복사를 지원하지 않아요. '이미지 저장'을 써 주세요.");
       busy(btn, true, "이미지 만드는 중");
-      // 사파리는 클릭 직후에 clipboard.write를 불러야 하므로 Promise를 그대로 넘긴다
-      await navigator.clipboard.write([new ClipboardItem({ "image/png": reportToBlob((readC(), build())) })]);
+      await navigator.clipboard.write([new ClipboardItem({ "image/png": reportToBlob(build()) })]);
       toast("이미지를 복사했어요. 카톡 대화창에 붙여넣기 하세요.");
     } catch (x) { toast(x.message || "복사하지 못했어요. '이미지 저장'을 써 주세요.", 4500); }
     busy(btn, false);
   };
-  $("#dl").onclick = async e => { const b = await makeBlob(e.currentTarget); const a = document.createElement("a"); a.href = URL.createObjectURL(b); a.download = fname(); a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 5000); };
+  $("#dl").onclick = async e => { busy(e.currentTarget, true, "이미지 만드는 중"); try { download(await reportToBlob(build()), fbase() + ".png"); } finally { busy(e.currentTarget, false); } };
   const sh = $("#share");
   if (sh) sh.onclick = async e => {
-    try { const b = await makeBlob(e.currentTarget); const file = new File([b], fname(), { type: "image/png" }); if (navigator.canShare({ files: [file] })) await navigator.share({ files: [file], title: `${s.name} 수행평가 리포트` }); else toast("이 휴대폰은 이미지 공유를 지원하지 않아요. '이미지 저장'을 써 주세요.", 4000); }
+    busy(e.currentTarget, true, "이미지 만드는 중");
+    try { const f = new File([await reportToBlob(build())], fbase() + ".png", { type: "image/png" }); if (navigator.canShare({ files: [f] })) await navigator.share({ files: [f], title: `${s.name} 수행평가 리포트` }); else toast("이 휴대폰은 이미지 공유를 지원하지 않아요. '이미지 저장'을 써 주세요.", 4000); }
     catch (x) { if (x.name !== "AbortError") toast(x.message, 4000); }
+    busy(e.currentTarget, false);
+  };
+  $("#html").onclick = async e => {
+    busy(e.currentTarget, true, "파일 만드는 중");
+    try {
+      const html = await reportToHTML(build());
+      const f = new File([html], fbase() + ".html", { type: "text/html" });
+      let shared = false;
+      if (navigator.canShare && navigator.canShare({ files: [f] })) { try { await navigator.share({ files: [f], title: `${s.name} 수행평가 리포트` }); shared = true; } catch (x) { if (x.name === "AbortError") shared = true; } }
+      if (!shared) { download(f, f.name); toast("HTML 파일을 저장했어요. 카톡·문자에서 파일 첨부로 보내 주세요.", 5000); }
+    } catch (x) { toast("파일을 만들지 못했습니다: " + x.message, 5000); }
+    busy(e.currentTarget, false);
   };
   const showUrl = u => { $("#urlbox").innerHTML = `<div class="share-url">${esc(u)}</div><div class="row" style="display:flex;gap:6px;margin-top:6px"><button class="btn sm" id="cpu">링크 복사</button><a class="btn sm" href="${esc(u)}" target="_blank" rel="noopener">열어 보기</a></div>`; $("#cpu").onclick = () => navigator.clipboard.writeText(u).then(() => toast("링크를 복사했어요"), () => toast("복사하지 못했어요. 주소를 길게 눌러 복사해 주세요.")); };
   const linkUrl = tk => `${reportBase()}report.html?id=${tk}`;
-  if (D.token) {
-    showUrl(linkUrl(D.token));
-    // 이미 공유한 링크가 있으면 열 때마다 최신 점수·분석으로 링크 내용을 갱신 (주소는 그대로)
-    S.store.saveReport(D.token, { ...build(), sid: id, by: S.user.email }).then(() => {
-      const n = document.createElement("p"); n.className = "small muted"; n.style.margin = "6px 0 0"; n.textContent = "공유 링크도 지금 화면 내용으로 갱신했어요.";
-      $("#urlbox")?.appendChild(n);
-    }).catch(() => {});
+  if (curObj().token) {
+    showUrl(linkUrl(curObj().token));
+    S.store.saveReport(curObj().token, { ...build(), sid: id, by: S.user.email }).catch(() => {});
   }
   $("#link").onclick = async e => {
-    readC(); busy(e.currentTarget, true, "링크 만드는 중");
+    busy(e.currentTarget, true, "링크 만드는 중");
     try {
-      const tk = D.token || newToken();
+      const tk = curObj().token || newToken();
       await S.store.saveReport(tk, { ...build(), sid: id, by: S.user.email });
-      await S.store.saveDraft(key, { comments: D.comments, token: tk, by: S.user.email, at: Date.now() });
-      D.token = tk; showUrl(linkUrl(tk));
+      curObj().token = tk; await persist(true); showUrl(linkUrl(tk));
       try { await navigator.clipboard.writeText(linkUrl(tk)); toast("링크를 만들고 복사했어요"); } catch (x) { toast("링크를 만들었어요"); }
     } catch (x) { toast("링크를 만들지 못했습니다: " + x.message, 5000); }
     busy(e.currentTarget, false);
