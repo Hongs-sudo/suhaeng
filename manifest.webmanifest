@@ -1,0 +1,1 @@
+{ "name": "수행평가 관리 · 수학도서관", "short_name": "수행평가", "start_url": "./", "display": "standalone", "background_color": "#F6F4EE", "theme_color": "#0A4844", "icons": [{ "src": "img/icon.png", "sizes": "512x512", "type": "image/png" }] }
