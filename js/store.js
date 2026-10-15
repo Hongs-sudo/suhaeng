@@ -67,6 +67,13 @@ class FirebaseStore {
     await this.F.setDoc(this.d("programs", PID, "records", sid), { rounds: { [r]: v } }, { merge: true });
   }
   async setRounds(sid, rounds) { await this.F.setDoc(this.d("programs", PID, "records", sid), { rounds }, { merge: true }); }
+  // 다른 선생님·다른 기기에서 바꾼 내용이 바로 반영되도록 실시간 구독
+  watch(onStudents, onRecords) {
+    const u1 = this.F.onSnapshot(this.col("students"), q => onStudents(q.docs.map(x => ({ id: x.id, ...x.data() }))), () => {});
+    const u2 = this.F.onSnapshot(this.col("programs", PID, "records"), q => { const o = {}; q.docs.forEach(x => o[x.id] = x.data().rounds || {}); onRecords(o); }, () => {});
+    return () => { u1(); u2(); };
+  }
+  async getRecord(sid) { const s = await this.F.getDoc(this.d("programs", PID, "records", sid)); return s.exists() ? (s.data().rounds || {}) : {}; }
 
   async listTeachers() { return this.all(this.col("teachers")); }
   async saveTeacher(t) { const e = lowerEmail(t.email); await this.F.setDoc(this.d("teachers", e), { ...t, email: e }, { merge: true }); }
@@ -132,6 +139,8 @@ class DemoStore {
     this.save();
   }
   async setRounds(sid, rounds) { this.s.records[sid] = { ...(this.s.records[sid] || {}), ...rounds }; this.save(); }
+  watch() { return () => {}; }
+  async getRecord(sid) { return JSON.parse(JSON.stringify(this.s.records[sid] || {})); }
   async listTeachers() { return Object.values(this.s.teachers); }
   async saveTeacher(t) { const e = lowerEmail(t.email); this.s.teachers[e] = { ...(this.s.teachers[e] || {}), ...t, email: e }; this.save(); }
   async deleteTeacher(email) { delete this.s.teachers[lowerEmail(email)]; this.save(); }

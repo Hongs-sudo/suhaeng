@@ -1,5 +1,5 @@
 // 수행평가·서술형 프로그램 관리 앱
-import { createStore, DEMO, newToken } from "./store.js";
+import { createStore, DEMO, newToken } from "./store.js?v=2";
 import { UNITS } from "./rubric.js";
 import { rubricFor, filesToJpegs, requestAnalysis, requestComment, ERROR_TYPES } from "./analyze.js";
 import { buildReport, renderReport, reportToBlob, classAverages, takenRounds, PARTS, esc, fmt, unitBr } from "./report.js";
@@ -42,6 +42,9 @@ async function boot() {
     await loadAll();
     renderChrome();
     route();
+    if (S.unwatch) S.unwatch();
+    S.unwatch = S.store.watch(st => { S.students = st.sort((a, b) => a.grade - b.grade || a.name.localeCompare(b.name, "ko")); softRefresh(); },
+      rc => { S.records = rc; softRefresh(); });
   });
 }
 async function loadAll() {
@@ -71,11 +74,23 @@ function markNav(h) {
   const base = h.startsWith("#/s/") || h.startsWith("#/a/") || h === "#/" || h === "" ? "#/" : h.startsWith("#/r/") ? "#/reports" : h.split("?")[0];
   $$("#topnav a, #botnav a").forEach(a => a.getAttribute("href") === base ? a.setAttribute("aria-current", "page") : a.removeAttribute("aria-current"));
 }
-function route() {
+// 다른 곳에서 데이터가 바뀌면 지금 보는 목록·현황 화면을 조용히 다시 그린다 (입력 중일 때는 건너뜀)
+let softT = null;
+function softRefresh() {
+  clearTimeout(softT);
+  softT = setTimeout(() => {
+    const h = location.hash || "#/";
+    if (!/^#\/(|overview|reports|s\/[^/]+(\/\d+)?)$/.test(h)) return;
+    if ($("#sheet-host").innerHTML.trim()) return;
+    const a = document.activeElement; if (a && /INPUT|TEXTAREA|SELECT/.test(a.tagName)) return;
+    const y = window.scrollY; route(true); window.scrollTo(0, y);
+  }, 400);
+}
+function route(soft = false) {
   const h = location.hash || "#/";
-  markNav(h); closeSheet(); window.scrollTo(0, 0);
+  markNav(h); if (!soft) { closeSheet(); window.scrollTo(0, 0); }
   const p = h.slice(2).split("/");
-  if (p[0] === "s" && stu(p[1])) return viewStudent(p[1], p[2] ? +p[2] : null);
+  if (p[0] === "s" && stu(p[1])) return viewStudent(p[1], p[2] && !soft ? +p[2] : null);
   if (p[0] === "a" && stu(p[1])) return viewAnalysis(p[1], +p[2]);
   if (p[0] === "overview") return viewOverview();
   if (p[0] === "reports") return viewReports();
@@ -437,7 +452,8 @@ async function viewReport(id, part) {
   const s = stu(id);
   main.innerHTML = `<div class="empty-state"><span class="spinner"></span> 리포트를 준비하고 있어요</div>`;
   const key = `${id}_${part}`;
-  const [analyses, draft] = await Promise.all([S.store.listAnalyses(id), S.store.getDraft(key)]);
+  const [analyses, draft, fresh] = await Promise.all([S.store.listAnalyses(id), S.store.getDraft(key), S.store.getRecord(id).catch(() => null)]);
+  if (fresh) S.records[id] = fresh; // 리포트는 항상 서버의 최신 점수로 만든다
   const avgs = classAverages(S.students, S.records);
   const D = { comments: { strengths: "", improve: "", plan: "", ...(draft?.comments || {}) }, token: draft?.token || null };
   const build = () => buildReport({ student: s, rounds: recs(id), analyses, avgs, part, comments: D.comments, cfg: CFG });
@@ -508,7 +524,14 @@ async function viewReport(id, part) {
   };
   const showUrl = u => { $("#urlbox").innerHTML = `<div class="share-url">${esc(u)}</div><div class="row" style="display:flex;gap:6px;margin-top:6px"><button class="btn sm" id="cpu">링크 복사</button><a class="btn sm" href="${esc(u)}" target="_blank" rel="noopener">열어 보기</a></div>`; $("#cpu").onclick = () => navigator.clipboard.writeText(u).then(() => toast("링크를 복사했어요"), () => toast("복사하지 못했어요. 주소를 길게 눌러 복사해 주세요.")); };
   const linkUrl = tk => `${reportBase()}report.html?id=${tk}`;
-  if (D.token) showUrl(linkUrl(D.token));
+  if (D.token) {
+    showUrl(linkUrl(D.token));
+    // 이미 공유한 링크가 있으면 열 때마다 최신 점수·분석으로 링크 내용을 갱신 (주소는 그대로)
+    S.store.saveReport(D.token, { ...build(), sid: id, by: S.user.email }).then(() => {
+      const n = document.createElement("p"); n.className = "small muted"; n.style.margin = "6px 0 0"; n.textContent = "공유 링크도 지금 화면 내용으로 갱신했어요.";
+      $("#urlbox")?.appendChild(n);
+    }).catch(() => {});
+  }
   $("#link").onclick = async e => {
     readC(); busy(e.currentTarget, true, "링크 만드는 중");
     try {
