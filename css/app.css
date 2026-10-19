@@ -282,3 +282,19 @@ a.rp-row{color:var(--ink);text-decoration:none}
 .pgrid label.other{opacity:.7}
 .pgrid label.none{opacity:.4;cursor:default}
 .tgl{display:flex!important;align-items:center;gap:8px;font-size:14px!important;color:var(--ink)!important;margin:0 0 6px!important}
+
+/* 확인 대기 순서 막대 (분석 화면 위) */
+.qbar{display:flex;align-items:center;gap:8px;flex-wrap:wrap;background:color-mix(in srgb,var(--gold) 12%,var(--surface));border:1px solid color-mix(in srgb,var(--gold) 40%,var(--line));border-radius:10px;padding:8px 12px;margin-bottom:12px;font-size:14px}
+.qbar .sp{flex:1}
+.qbar [aria-disabled="true"]{opacity:.4;pointer-events:none}
+
+/* A4 인쇄: 리포트만 한 장 */
+#print-host{position:fixed;left:-10000px;top:0;width:794px;pointer-events:none}
+@media print{
+  @page{size:A4 portrait;margin:0}
+  html,body{background:#fff!important;margin:0!important;padding:0!important}
+  body.printing>*:not(#print-host){display:none!important}
+  body.printing #print-host{display:block;position:static;left:auto}
+  #print-host .rep{width:794px;-webkit-print-color-adjust:exact;print-color-adjust:exact}
+  #print-host .paper{min-height:1122px}
+}

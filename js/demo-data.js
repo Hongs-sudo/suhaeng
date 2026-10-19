@@ -1,5 +1,5 @@
 // 데모 모드 예시 데이터 (실제 학생 아님)
-import { demoAnalysis } from "./analyze.js?v=5";
+import { demoAnalysis } from "./analyze.js?v=6";
 
 export function seed() {
   const teachers = {

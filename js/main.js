@@ -1,10 +1,10 @@
 // 수행평가·서술형 프로그램 관리 앱
-import { createStore, DEMO, newToken } from "./store.js?v=5";
-import { UNITS } from "./rubric.js?v=5";
-import { rubricFor, filesToJpegs, requestAnalysis, requestComment, ERROR_TYPES } from "./analyze.js?v=5";
-import { buildReport, renderReport, reportToBlob, reportToHTML, classAverages, takenRounds, defaultParts, esc, fmt, unitBr } from "./report.js?v=5";
-import { parseWorkbook } from "./excel-import.js?v=5";
-import { viewBulk } from "./bulk.js?v=5";
+import { createStore, DEMO, newToken } from "./store.js?v=6";
+import { UNITS } from "./rubric.js?v=6";
+import { rubricFor, filesToJpegs, requestAnalysis, requestComment, ERROR_TYPES } from "./analyze.js?v=6";
+import { buildReport, renderReport, reportToBlob, reportToHTML, classAverages, takenRounds, defaultParts, esc, fmt, unitBr } from "./report.js?v=6";
+import { parseWorkbook } from "./excel-import.js?v=6";
+import { viewBulk } from "./bulk.js?v=6";
 
 const CFG = window.APP_CONFIG;
 const $ = (s, el = document) => el.querySelector(s);
@@ -29,6 +29,12 @@ function busy(btn, on, label) {
   if (!btn) return;
   if (on) { btn._t = btn.innerHTML; btn.disabled = true; btn.innerHTML = `<span class="spinner"></span> ${label || ""}`; }
   else { btn.disabled = false; if (btn._t) btn.innerHTML = btn._t; }
+}
+// 확인 대기 시험지 목록 (일괄 올리기의 확인 대기 목록과 같은 순서)
+function pendingQueue() {
+  const mine = S.filter.mine, rows = [];
+  S.students.forEach(s => { if (mine && s.teacher !== S.user.name) return; Object.entries(recs(s.id)).forEach(([r, x]) => { if (x && x.pending) rows.push({ id: s.id, k: +r, g: s.grade, name: s.name }); }); });
+  return rows.sort((a, b) => a.g - b.g || a.name.localeCompare(b.name, "ko") || a.k - b.k);
 }
 function nextRound(id) { const r = recs(id); for (let i = 1; i <= 10; i++) if (!r[i]) return i; return null; }
 function lastAt(id) { return Math.max(0, ...Object.values(recs(id)).map(x => x.at || 0)); }
@@ -131,7 +137,7 @@ function viewList() {
   let list = S.students.filter(s => (!f.mine || s.teacher === S.user.name) && (!f.grade || s.grade === f.grade) && (!q || s.name.includes(q) || (s.school || "").includes(q)));
   list.sort((a, b) => (a.status !== "재원") - (b.status !== "재원") || lastAt(b.id) - lastAt(a.id) || a.name.localeCompare(b.name, "ko"));
   const nPend = S.students.filter(s => !f.mine || s.teacher === S.user.name).reduce((a, s) => a + Object.values(recs(s.id)).filter(x => x && x.pending).length, 0);
-  main.innerHTML = `<div class="page-head"><h1>점수 입력</h1><span class="sp"></span><a class="btn sm" href="#/bulk">시험지 일괄 올리기${nPend ? ` <span class="pill gold num">확인 대기 ${nPend}</span>` : ""}</a><span class="muted small">${list.length}명</span></div>
+  main.innerHTML = `<div class="page-head"><h1>점수 입력</h1><span class="sp"></span>${nPend ? (() => { const q0 = pendingQueue()[0]; return q0 ? `<a class="btn sm gold" href="#/a/${q0.id}/${q0.k}">확인 대기 <b class="num">${nPend}</b>건 확인하기</a>` : ""; })() : ""}<a class="btn sm" href="#/bulk">시험지 일괄 올리기</a><span class="muted small">${list.length}명</span></div>
     <div class="list-tools">
       <input class="input" id="q" type="search" placeholder="학생 이름·학교 검색" value="${esc(f.q)}" aria-label="학생 검색" autocomplete="off">
       <div class="chips" id="fchips">
@@ -285,7 +291,16 @@ async function viewAnalysis(id, k) {
   const s = stu(id), g = s.grade, x = recs(id)[k];
   const unit = UNITS[g][k - 1];
   const A = { images: [], result: null, saved: null, edit: false };
-  main.innerHTML = `<div class="stu-head"><a class="back" href="#/s/${id}" aria-label="학생으로">‹</a>
+  // 확인 대기 순서: 이 화면을 열 때의 목록을 기억해 두고 이전/다음으로 넘긴다
+  if (!S.review || !S.review.some(q => q.id === id && q.k === k)) S.review = x && x.pending ? pendingQueue() : null;
+  const RQ = S.review, qi = RQ ? RQ.findIndex(q => q.id === id && q.k === k) : -1;
+  const stillPending = q => { const r = recs(q.id)[q.k]; return r && r.pending; };
+  const nextPending = () => { if (!RQ) return null; for (let j = 1; j <= RQ.length; j++) { const q = RQ[(qi + j) % RQ.length]; if (!(q.id === id && q.k === k) && stillPending(q)) return q; } return null; };
+  const qbar = RQ && qi >= 0 ? `<div class="qbar"><span>확인 대기 <b class="num">${qi + 1} / ${RQ.length}</b></span>
+      ${qi > 0 ? `<a class="btn sm" href="#/a/${RQ[qi - 1].id}/${RQ[qi - 1].k}">‹ 이전</a>` : `<span class="btn sm" aria-disabled="true">‹ 이전</span>`}
+      ${qi < RQ.length - 1 ? `<a class="btn sm" href="#/a/${RQ[qi + 1].id}/${RQ[qi + 1].k}">다음 ›</a>` : `<span class="btn sm" aria-disabled="true">다음 ›</span>`}
+      <span class="sp"></span><a class="btn sm" href="#/bulk" id="qlist">목록으로</a></div>` : "";
+  main.innerHTML = qbar + `<div class="stu-head"><a class="back" href="#/s/${id}" aria-label="학생으로">‹</a>
       <div style="flex:1;min-width:0"><h1>${k}회 ${esc(unit)}</h1><div class="meta">${esc(s.name)} · ${esc(s.school)} 중${g} · 입력 점수 <b class="num">${scored(x) ? fmt(x.score) : x && x.aiScore ? `AI ${fmt(x.score)} (확인 전)` : "없음"}</b></div></div></div>
     <div class="ana">
       <div>
@@ -297,6 +312,7 @@ async function viewAnalysis(id, k) {
       </div>
       <section class="card" id="res" style="min-width:0"><div class="empty-state">시험지를 올리고 '분석 시작'을 누르면 문항별 결과가 여기에 나옵니다.</div></section>
     </div>`;
+  if ($("#qlist")) $("#qlist").onclick = () => { S.jumpPending = true; };
   const paintThumbs = () => {
     $("#thumbs").innerHTML = A.images.map((u, i) => `<div style="position:relative"><img src="${u}" alt="${i + 1}쪽" data-i="${i}">${A.result && A.saved && !A.edit ? "" : `<button class="btn sm" data-rm="${i}" style="position:absolute;top:4px;right:4px;padding:0 7px;background:var(--surface)" aria-label="${i + 1}쪽 빼기">×</button>`}</div>`).join("");
     $("#go").disabled = !A.images.length;
@@ -346,7 +362,7 @@ async function viewAnalysis(id, k) {
             ${ed ? `<div class="edit"><select class="input" data-et="${i}" aria-label="오류 유형"><option value="">오류 유형 없음</option>${ERROR_TYPES.map(t => `<option ${it.error_type === t ? "selected" : ""}>${t}</option>`).join("")}</select><input class="input" data-memo="${i}" value="${esc(it.memo)}" placeholder="메모 (부모님 리포트에는 나가지 않아요)"></div>` : ""}
           </div></li>`;
       }).join("")}</ul>
-      <div class="ana-foot">${ed ? `<button class="btn fill" id="confirm">확인하고 저장</button>${A.saved && A.saved.confirmed ? `<button class="btn" id="cancel">취소</button>` : ""}` : `<button class="btn" id="redit">판독 수정</button>`}<span class="small muted">${A.saved && A.saved.by ? `확인: ${esc(String(A.saved.by).split("@")[0])}` : ""}</span></div>`;
+      <div class="ana-foot">${ed ? `<button class="btn fill" id="confirm">${x && x.pending && nextPending() ? "확인하고 저장 · 다음 ›" : "확인하고 저장"}</button>${A.saved && A.saved.confirmed ? `<button class="btn" id="cancel">취소</button>` : ""}` : `<button class="btn" id="redit">판독 수정</button>`}<span class="small muted">${A.saved && A.saved.by ? `확인: ${esc(String(A.saved.by).split("@")[0])}` : ""}</span></div>`;
   }
   $("#res").addEventListener("click", e => {
     const h = e.target.closest(".hd"); if (h) { const li = h.parentElement; li.classList.toggle("open"); h.setAttribute("aria-expanded", li.classList.contains("open")); return; }
@@ -371,7 +387,13 @@ async function viewAnalysis(id, k) {
       if (!cur || cur.aiScore || cur.score == null) { rec.score = A.result.total; rec.aiScore = false; rec.status = "응시"; }
       await S.store.saveRound(id, k, rec, S.user.email);
       S.records[id] = { ...recs(id), [k]: { ...rec, by: S.user.email, at: Date.now() } };
-      A.saved = JSON.parse(JSON.stringify(a)); A.edit = false; paintResult(); paintThumbs();
+      A.saved = JSON.parse(JSON.stringify(a)); A.edit = false;
+      if (RQ) {
+        const nx = nextPending();
+        if (nx) { toast(`저장했어요 · 다음: ${stu(nx.id).name} ${nx.k}회`); location.hash = `#/a/${nx.id}/${nx.k}`; return; }
+        S.review = null; toast("확인 대기 시험지를 모두 확인했어요.", 3500); S.jumpPending = true; location.hash = "#/bulk"; return;
+      }
+      paintResult(); paintThumbs();
       toast("분석 결과를 저장했어요. 리포트에 반영됩니다.");
     } catch (e) { toast("저장하지 못했습니다: " + e.message, 5000); busy(btn, false); }
   }
@@ -381,6 +403,28 @@ async function viewAnalysis(id, k) {
   if (saved) { A.saved = saved; A.result = JSON.parse(JSON.stringify(saved)); A.images = scans; A.edit = !saved.confirmed; paintResult(); }
   if (S.pending && S.pending.id === id && S.pending.k === k) { const f = S.pending.files; S.pending = null; A.images = []; await add(f); if (!saved) $("#go").click(); }
   paintThumbs();
+}
+
+/* A4 세로 한 장 인쇄: 리포트만 따로 그려 인쇄하고, 길면 한 장에 맞게 줄인다 */
+function printReport(d) {
+  document.getElementById("print-host")?.remove();
+  const host = document.createElement("div");
+  host.id = "print-host";
+  host.innerHTML = renderReport(d);
+  document.body.appendChild(host);
+  document.body.classList.add("printing");
+  const paper = host.querySelector(".rep");
+  const go = () => {
+    const h = paper.scrollHeight, page = 1122;
+    paper.style.zoom = h > page ? String(Math.floor(page / h * 1000) / 1000) : "";
+    const done = () => { document.body.classList.remove("printing"); host.remove(); window.removeEventListener("afterprint", done); };
+    window.addEventListener("afterprint", done);
+    window.print();
+    setTimeout(() => { if (!matchMedia("print").matches) done(); }, 60000);
+  };
+  // 로고 그림을 다 불러온 뒤 인쇄
+  const img = host.querySelector("img");
+  if (img && !img.complete) { img.onload = img.onerror = () => setTimeout(go, 50); } else setTimeout(go, 50);
 }
 
 /* ================================================================ 전체 현황 */
@@ -525,7 +569,8 @@ async function viewReport(id, pi) {
         <div class="card"><h3>보내기</h3><div class="rp-btns">
           <button class="btn fill" id="copy">이미지 복사</button><button class="btn" id="dl">이미지 저장</button>
           ${canShare ? `<button class="btn" id="share" style="grid-column:span 2">카톡·문자로 이미지 보내기</button>` : ""}
-          <button class="btn gold" id="html" style="grid-column:span 2">휴대폰용 HTML 파일 보내기</button></div>
+          <button class="btn gold" id="html" style="grid-column:span 2">휴대폰용 HTML 파일 보내기</button>
+          <button class="btn" id="print" style="grid-column:span 2">A4로 인쇄하기</button></div>
           <p class="small muted" style="margin:8px 0 0">HTML 파일은 부모님이 열면 휴대폰 화면 폭에 맞춰 보여요. PC에서는 파일로 저장되니 카톡 PC에서 파일 첨부로 보내 주세요.</p>
           <details style="margin-top:8px"><summary class="small muted">더보기: 공유 링크</summary>
             <button class="btn sm" id="link" style="margin-top:8px">공유 링크 만들기</button><div id="urlbox" style="margin-top:8px"></div></details>
@@ -594,6 +639,7 @@ async function viewReport(id, pi) {
     } catch (x) { toast(x.message || "복사하지 못했어요. '이미지 저장'을 써 주세요.", 4500); }
     busy(btn, false);
   };
+  $("#print").onclick = () => printReport(build());
   $("#dl").onclick = async e => { busy(e.currentTarget, true, "이미지 만드는 중"); try { download(await reportToBlob(build()), fbase() + ".png"); } finally { busy(e.currentTarget, false); } };
   const sh = $("#share");
   if (sh) sh.onclick = async e => {
