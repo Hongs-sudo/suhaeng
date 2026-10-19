@@ -1,7 +1,7 @@
 // 시험지 일괄 올리기: 여러 학생 시험지를 한 파일로 올려 학생·회차별로 나누고 차례로 분석
-import { UNITS } from "./rubric.js?v=4";
-import { filesToPageBlobs, blobToDataURL, shrinkBlob, requestIdentify, requestAnalysis } from "./analyze.js?v=4";
-import { esc, fmt } from "./report.js?v=4";
+import { UNITS } from "./rubric.js?v=5";
+import { filesToPageBlobs, blobToDataURL, shrinkBlob, requestIdentify, requestAnalysis } from "./analyze.js?v=5";
+import { esc, fmt } from "./report.js?v=5";
 
 const B = { pages: [], thumbs: [], reads: [], groups: [], grade: 0, round: 0, fileName: "", running: null };
 const ID_BATCH = 8, ID_PARALLEL = 2, AN_PARALLEL = 2, MAX_PAGES = 6;
@@ -62,7 +62,7 @@ async function identifyAll(ctx) {
   const n = B.pages.length, batches = [];
   for (let i = 0; i < n; i += ID_BATCH) batches.push(i);
   B.reads = new Array(n);
-  let done = 0, failed = 0;
+  let done = 0, failed = 0, lastErr = "";
   $("#bgo").disabled = true;
   const worker = async () => {
     while (batches.length) {
@@ -71,14 +71,14 @@ async function identifyAll(ctx) {
       try {
         const res = await requestIdentify({ store: S.store, images: imgs, roster, grade: B.grade, round: B.round, offset: off });
         res.forEach(p => { if (p.index >= off && p.index < off + imgs.length) B.reads[p.index] = p; });
-      } catch (x) { failed++; toast(x.message, 4000); }
+      } catch (x) { failed++; lastErr = x.message; toast(x.message, 4000); }
       done += imgs.length; $("#bmsg").textContent = `쪽 읽는 중 ${Math.min(done, n)} / ${n}`;
     }
   };
   await Promise.all(Array.from({ length: ID_PARALLEL }, worker));
   for (let i = 0; i < n; i++) if (!B.reads[i]) B.reads[i] = { index: i, blank: false, name_read: "", student_id: "", candidates: [], grade: 0, round: 0, first_item: 0, failed: true };
   B.groups = buildGroups(ctx, B.reads);
-  $("#bmsg").textContent = failed ? `일부 쪽을 읽지 못했어요 (${failed}묶음). 표에서 직접 골라 주세요.` : `${n}쪽을 읽었어요.`;
+  $("#bmsg").textContent = failed ? `일부 쪽을 읽지 못했어요 (${failed}묶음). 표에서 직접 골라 주세요. 원인: ${lastErr}` : `${n}쪽을 읽었어요.`;
   $("#bgo").disabled = false;
   paintGroups(ctx);
 }
@@ -241,7 +241,8 @@ function paintRun(ctx, job, finished = false) {
   el.innerHTML = `<h2><span class="n">3</span>분석 ${finished ? "결과" : "진행"}</h2>
     <div class="bk-bar" role="progressbar" aria-valuemin="0" aria-valuemax="${n}" aria-valuenow="${d}"><span style="width:${n ? d / n * 100 : 0}%"></span></div>
     <p class="small muted num" style="margin:0">${d} / ${n}건 완료${finished ? "" : ` · 남은 시간 약 ${Math.max(1, Math.ceil((n - d) * 35 / AN_PARALLEL / 60))}분 · 화면을 닫아도 다음에 '이어서 진행'할 수 있어요`}</p>
-    <div class="bk-prog num">${job.items.map(it => `<a href="#/a/${it.sid}/${it.round}" class="${it.status}"><span>${esc(nm(it.sid))} ${it.round}회</span><span>${it.status === "done" ? (it.diff == null ? `AI ${fmt(it.total)}점` : Math.abs(it.diff) < 0.01 ? "일치" : `${it.diff > 0 ? "+" : ""}${fmt(it.diff)}점 차이`) : it.status === "running" ? '<span class="spinner"></span>' : it.status === "error" ? "실패" : "대기"}</span></a>`).join("")}</div>`;
+    <div class="bk-prog num">${job.items.map(it => `<a href="#/a/${it.sid}/${it.round}" class="${it.status}"${it.status === "error" && it.error ? ` title="${esc(it.error)}"` : ""}><span>${esc(nm(it.sid))} ${it.round}회</span><span>${it.status === "done" ? (it.diff == null ? `AI ${fmt(it.total)}점` : Math.abs(it.diff) < 0.01 ? "일치" : `${it.diff > 0 ? "+" : ""}${fmt(it.diff)}점 차이`) : it.status === "running" ? '<span class="spinner"></span>' : it.status === "error" ? "실패" : "대기"}</span></a>`).join("")}</div>
+    ${(() => { const e = job.items.find(i => i.status === "error" && i.error); return e ? `<p class="bk-err">실패 원인: ${esc(e.error)}</p>` : ""; })()}`;
 }
 
 /* ---------------- 확인 대기 목록 ---------------- */

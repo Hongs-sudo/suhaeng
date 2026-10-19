@@ -1,0 +1,11 @@
+// 수행평가 분석 서버 배포 설정 (Cloudflare가 GitHub에서 자동 배포할 때 읽음)
+{
+  "name": "suhaeng-analyzer",
+  "main": "worker.js",
+  "compatibility_date": "2025-09-01",
+  // 대시보드에 넣어 둔 변수(FIREBASE_PROJECT_ID, ALLOWED_ORIGINS 등)를 지우지 않고 그대로 둠
+  "keep_vars": true,
+  // 홍콩에서 실행되면 AI 요청이 막히므로 도쿄 근처에서 실행되게 고정
+  "placement": { "region": "aws:ap-northeast-1" },
+  "observability": { "enabled": true }
+}

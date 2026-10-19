@@ -1,10 +1,10 @@
 // 수행평가·서술형 프로그램 관리 앱
-import { createStore, DEMO, newToken } from "./store.js?v=4";
-import { UNITS } from "./rubric.js?v=4";
-import { rubricFor, filesToJpegs, requestAnalysis, requestComment, ERROR_TYPES } from "./analyze.js?v=4";
-import { buildReport, renderReport, reportToBlob, reportToHTML, classAverages, takenRounds, defaultParts, esc, fmt, unitBr } from "./report.js?v=4";
-import { parseWorkbook } from "./excel-import.js?v=4";
-import { viewBulk } from "./bulk.js?v=4";
+import { createStore, DEMO, newToken } from "./store.js?v=5";
+import { UNITS } from "./rubric.js?v=5";
+import { rubricFor, filesToJpegs, requestAnalysis, requestComment, ERROR_TYPES } from "./analyze.js?v=5";
+import { buildReport, renderReport, reportToBlob, reportToHTML, classAverages, takenRounds, defaultParts, esc, fmt, unitBr } from "./report.js?v=5";
+import { parseWorkbook } from "./excel-import.js?v=5";
+import { viewBulk } from "./bulk.js?v=5";
 
 const CFG = window.APP_CONFIG;
 const $ = (s, el = document) => el.querySelector(s);

@@ -1,6 +1,6 @@
 // 엑셀(구글시트 내보내기) → 학생·회차 점수 변환
 // 시트 이름이 "수행평가_" 로 시작하는 시트만 읽는다 (얼리어답터 등은 제외).
-import { UNITS } from "./rubric.js?v=4";
+import { UNITS } from "./rubric.js?v=5";
 
 const STATUS_WORDS = ["퇴원", "휴원", "신규", "내신"];
 const norm = s => String(s ?? "").replace(/\s+/g, "").replace(/[()（）]/g, m => (m === "（" ? "(" : m === "）" ? ")" : m));
