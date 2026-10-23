@@ -117,7 +117,7 @@ const LS = "suhaeng-demo-v1";
 class DemoStore {
   async init() {
     try { this.s = JSON.parse(localStorage.getItem(LS)); } catch (e) { this.s = null; }
-    if (!this.s) this.s = (await import("./demo-data.js?v=6")).seed();
+    if (!this.s) this.s = (await import("./demo-data.js?v=7")).seed();
   }
   // 스캔 이미지는 용량이 커서 브라우저 저장에서 빼고 메모리에만 둔다 (데모 전용)
   save() { try { const { scans, ...rest } = this.s; localStorage.setItem(LS, JSON.stringify(rest)); } catch (e) { /* 저장 공간 부족 등은 무시 */ } }

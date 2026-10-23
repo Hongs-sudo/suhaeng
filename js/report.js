@@ -1,6 +1,6 @@
 // 부모님 리포트: 데이터 만들기 + 화면 그리기 + 이미지·HTML 파일 만들기 (앱과 공유 페이지가 함께 사용)
 // 부모님께 나가는 리포트에는 날짜를 넣지 않고 회차 번호 순서로만 보여 준다.
-import { UNITS, UNIT_LINES } from "./rubric.js?v=6";
+import { UNITS, UNIT_LINES } from "./rubric.js?v=7";
 
 export const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 export const fmt = n => n == null || isNaN(n) ? "–" : (Math.round(n * 10) / 10).toString();
@@ -182,7 +182,7 @@ let assets = null;
 async function loadAssets() {
   if (!assets) assets = (async () => {
     const [css, logo] = await Promise.all([
-      fetch("css/report.css?v=6").then(r => r.text()),
+      fetch("css/report.css?v=7").then(r => r.text()),
       fetch("img/logo.png").then(r => r.blob()).then(b => new Promise(ok => { const fr = new FileReader(); fr.onload = () => ok(fr.result); fr.readAsDataURL(b); }))
     ]);
     return { css, logo };

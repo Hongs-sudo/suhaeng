@@ -1,1 +1,25 @@
-{ "name": "수행평가 관리 · 수학도서관", "short_name": "수행평가", "start_url": "./", "display": "standalone", "background_color": "#F6F4EE", "theme_color": "#0A4844", "icons": [{ "src": "img/icon.png", "sizes": "512x512", "type": "image/png" }] }
+{
+ "id": "./",
+ "name": "수행평가 관리 · 수학도서관",
+ "short_name": "수행평가",
+ "description": "수학도서관 중등부 수행평가·서술형 점수 입력, 시험지 분석, 부모님 리포트",
+ "start_url": "./",
+ "scope": "./",
+ "display": "standalone",
+ "background_color": "#F6F4EE",
+ "theme_color": "#0A4844",
+ "icons": [
+  {
+   "src": "img/icon-192.png",
+   "sizes": "192x192",
+   "type": "image/png",
+   "purpose": "any"
+  },
+  {
+   "src": "img/icon.png",
+   "sizes": "512x512",
+   "type": "image/png",
+   "purpose": "any"
+  }
+ ]
+}

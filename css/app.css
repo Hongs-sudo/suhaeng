@@ -298,3 +298,14 @@ a.rp-row{color:var(--ink);text-decoration:none}
   #print-host .rep{width:794px;-webkit-print-color-adjust:exact;print-color-adjust:exact}
   #print-host .paper{min-height:1122px}
 }
+
+/* 앱 설치 버튼 */
+.who button.inst{display:inline-flex;align-items:center;gap:5px;background:var(--brand,#0A4844);color:#fff;border:0;border-radius:999px;padding:6px 13px;font-size:12.5px;font-weight:700;box-shadow:0 0 0 3px color-mix(in srgb,#DEBC62 55%,transparent);cursor:pointer}
+.who button.inst[hidden]{display:none}
+.who button.inst svg{width:15px;height:15px}
+.who button.inst:focus-visible{outline:2px solid #DEBC62;outline-offset:2px}
+@media (max-width:520px){.who button.inst{padding:5px 10px;font-size:12px}}
+.ios-steps{margin:0 0 8px 18px;display:grid;gap:6px;font-size:14px}
+.who button,.brand-t b{white-space:nowrap}
+@media (max-width:520px){.who{gap:6px}.who>span:not(.demo-flag){display:none}.who button{padding:4px 8px}.brand-t b{font-size:15px}}
+@media (max-width:400px){.brand-t{display:none}.who .demo-flag{display:none}}

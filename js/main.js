@@ -1,10 +1,10 @@
 // 수행평가·서술형 프로그램 관리 앱
-import { createStore, DEMO, newToken } from "./store.js?v=6";
-import { UNITS } from "./rubric.js?v=6";
-import { rubricFor, filesToJpegs, requestAnalysis, requestComment, ERROR_TYPES } from "./analyze.js?v=6";
-import { buildReport, renderReport, reportToBlob, reportToHTML, classAverages, takenRounds, defaultParts, esc, fmt, unitBr } from "./report.js?v=6";
-import { parseWorkbook } from "./excel-import.js?v=6";
-import { viewBulk } from "./bulk.js?v=6";
+import { createStore, DEMO, newToken } from "./store.js?v=7";
+import { UNITS } from "./rubric.js?v=7";
+import { rubricFor, filesToJpegs, requestAnalysis, requestComment, ERROR_TYPES } from "./analyze.js?v=7";
+import { buildReport, renderReport, reportToBlob, reportToHTML, classAverages, takenRounds, defaultParts, esc, fmt, unitBr } from "./report.js?v=7";
+import { parseWorkbook } from "./excel-import.js?v=7";
+import { viewBulk } from "./bulk.js?v=7";
 
 const CFG = window.APP_CONFIG;
 const $ = (s, el = document) => el.querySelector(s);
@@ -69,13 +69,41 @@ const NAV = [
   ["#/reports", "리포트", '<path d="M7 3h7l4 4v14H7zM14 3v4h4M10 12h5M10 16h5" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/>'],
   ["#/admin", "관리", '<circle cx="12" cy="8" r="3.5" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M5 20c1-4 4-6 7-6s6 2 7 6" fill="none" stroke="currentColor" stroke-width="1.8"/>']
 ];
+/* 앱 설치 버튼: 크롬·엣지(PC·안드로이드)는 설치 창, 아이폰은 홈 화면 추가 안내 */
+const isStandalone = () => matchMedia("(display-mode: standalone)").matches || navigator.standalone === true;
+const isIOS = () => /iphone|ipad|ipod/i.test(navigator.userAgent) || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
+const isMobile = () => /android|iphone|ipad|ipod|mobile/i.test(navigator.userAgent) || isIOS();
+let installEvt = null;
+window.addEventListener("beforeinstallprompt", e => { e.preventDefault(); installEvt = e; paintInstall(); });
+window.addEventListener("appinstalled", () => { installEvt = null; paintInstall(); toast("앱을 설치했어요. 바탕화면이나 홈 화면의 아이콘으로 열 수 있어요.", 4000); });
+function paintInstall() {
+  const b = document.getElementById("install"); if (!b) return;
+  b.hidden = isStandalone() || !(installEvt || isIOS());
+  b.querySelector("span").textContent = isMobile() ? "앱 설치" : "PC에 앱 설치";
+}
+async function onInstall() {
+  if (installEvt) {
+    installEvt.prompt();
+    const r = await installEvt.userChoice.catch(() => null);
+    if (r && r.outcome === "accepted") { installEvt = null; paintInstall(); }
+    return;
+  }
+  if (isIOS()) {
+    const el = sheet(`<div class="grab"></div><h2 style="margin:0 0 8px">아이폰 홈 화면에 추가하기</h2>
+      <ol class="ios-steps"><li>화면 아래쪽 <b>공유 버튼</b>(네모에 위쪽 화살표)을 눌러요.</li><li>목록에서 <b>홈 화면에 추가</b>를 눌러요.</li><li>오른쪽 위 <b>추가</b>를 누르면 끝이에요.</li></ol>
+      <p class="small muted">사파리에서 열었을 때만 돼요. 카톡 안에서 열었다면 오른쪽 아래 메뉴에서 ‘Safari로 열기’를 먼저 눌러 주세요.</p>
+      <button class="btn fill" data-close style="width:100%;margin-top:10px">확인</button>`);
+    el.querySelector("[data-close]").onclick = closeSheet;
+  }
+}
 function renderChrome() {
   const nav = NAV.filter(n => n[0] !== "#/admin" || isAdmin());
   $("#topnav").innerHTML = nav.map(n => `<a href="${n[0]}">${n[1]}</a>`).join("");
   $("#botnav").style.setProperty("--n", nav.length);
   $("#botnav").innerHTML = nav.map(n => `<a href="${n[0]}"><svg viewBox="0 0 24 24" aria-hidden="true">${n[2]}</svg>${n[1]}</a>`).join("");
-  $("#who").innerHTML = `${DEMO ? '<span class="demo-flag">데모</span>' : ""}<span>${esc(S.user.name || S.user.email)}</span><button id="logout">로그아웃</button>`;
+  $("#who").innerHTML = `<button id="install" class="inst" hidden><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 4v11M7 10l5 5 5-5M5 20h14" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg><span>앱 설치</span></button>${DEMO ? '<span class="demo-flag">데모</span>' : ""}<span>${esc(S.user.name || S.user.email)}</span><button id="logout">로그아웃</button>`;
   $("#logout").onclick = () => S.store.signOut();
+  $("#install").onclick = onInstall; paintInstall();
   $("#topbar").hidden = false; $("#botnav").hidden = false;
 }
 function markNav(h) {
@@ -543,7 +571,7 @@ async function viewReport(id, pi) {
         <div class="card"><h3>차시 정하기</h3>
           <div class="chips" id="parts">${P.parts.map((p, i) => `<button data-p="${i}" aria-pressed="${i === idx}">${esc(p.label)}</button>`).join("")}<button data-add="1" class="add">+ 차시 추가</button><button data-p="all" aria-pressed="${isAll}">전체</button></div>
           ${isAll ? `<p class="small muted" style="margin:8px 0 0">응시한 모든 회차(${t.map(x => x.round).sort((a, b) => a - b).join("·") || "없음"}회)를 회차 순서로 보여 줘요.</p>` : `
-          <div class="row" style="display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin-top:8px"><label class="small muted" for="psize">자동으로 고를 회차 수</label>
+          <div class="row" style="display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin-top:8px"><label class="small muted" for="psize">이 학생은 몇 회씩 묶어 보낼까요 (기본 5회)</label>
             <select id="psize" class="input" style="width:auto;padding:5px 8px">${[2, 3, 4, 5, 6, 7, 8, 10].map(n => `<option ${P.size === n ? "selected" : ""}>${n}</option>`).join("")}</select>
             <button class="btn sm" id="pauto">자동으로 다시 고르기</button></div>
           <p class="small muted" style="margin:6px 0 0">체크한 회차가 ${esc(cur().label)} 리포트에 들어가요. 리포트에는 회차 번호 순서로 나오고, 날짜는 선생님 화면에만 보여요.</p>
