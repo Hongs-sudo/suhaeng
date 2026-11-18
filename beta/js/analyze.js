@@ -1,7 +1,7 @@
 // 시험지 스캔 처리 + 분석 서버 호출
-import { RUBRIC } from "./rubric.js?v=8";
-import { unitOf, isLegacyTerm, TERM, setKey } from "./curriculum.js?v=8";
-import { BANK } from "./bankcache.js?v=8";
+import { RUBRIC } from "./rubric.js?v=9";
+import { unitOf, isLegacyTerm, TERM, setKey } from "./curriculum.js?v=9";
+import { BANK } from "./bankcache.js?v=9";
 
 export const ERROR_TYPES = ["개념 이해", "조건 해석", "계산 실수", "풀이 과정 서술", "미응답"];
 

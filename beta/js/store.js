@@ -133,7 +133,7 @@ const LS = "suhaeng-demo-v1";
 class DemoStore {
   async init() {
     try { this.s = JSON.parse(localStorage.getItem(LS)); } catch (e) { this.s = null; }
-    if (!this.s) this.s = (await import("./demo-data.js?v=8")).seed();
+    if (!this.s) this.s = (await import("./demo-data.js?v=9")).seed();
   }
   // 스캔 이미지는 용량이 커서 브라우저 저장에서 빼고 메모리에만 둔다 (데모 전용)
   save() { try { const { scans, ...rest } = this.s; const x = { ...(rest.x || {}) }; delete x.figs; localStorage.setItem(LS, JSON.stringify({ ...rest, x })); } catch (e) { /* 저장 공간 부족 등은 무시 */ } }
@@ -181,8 +181,14 @@ class DemoStore {
     c[k] = merge ? { ...(c[k] || {}), ...JSON.parse(JSON.stringify(data)) } : JSON.parse(JSON.stringify(data));
     if (col !== "figs") this.save(); return k;
   }
-  async delX(col, id) { delete this._c(col)[id]; this.save(); }
+  async delX(col, id) {
+    // 데모에서는 기존 기록이 따로 보관돼 있다
+    if (col === "records") delete this.s.records[id]; else if (col === "analyses") delete this.s.analyses[id]; else if (col === "drafts") delete (this.s.drafts || {})[id];
+    else delete this._c(col)[id];
+    this.save();
+  }
   async listX(col, where = []) {
+    if (col === "drafts") return Object.entries(this.s.drafts || {}).map(([id, v]) => ({ id, ...v }));
     const ok = v => where.every(([f, op, val]) => op === "==" ? v[f] === val : op === "in" ? val.includes(v[f]) : true);
     return Object.entries(this._c(col)).map(([id, v]) => ({ id, ...v })).filter(ok).map(v => JSON.parse(JSON.stringify(v)));
   }

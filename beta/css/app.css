@@ -262,8 +262,8 @@ table.ov td.ai{font-style:italic;color:var(--muted)}
 
 /* 로고 (다크 모드에서는 흰 칩 위에) */
 .brand{flex-direction:row;align-items:center;gap:10px}
-.brand-logo{display:flex;align-items:center;background:#fff;border-radius:8px;padding:3px 6px}
-.brand-logo img{height:26px;width:auto;display:block}
+.brand-logo{display:flex;align-items:center}
+.brand-logo img{height:30px;width:auto;display:block}
 .brand-t{display:flex;flex-direction:column;line-height:1.15}
 @media (max-width:520px){.brand-t small{display:none}.brand-logo img{height:22px}}
 
@@ -476,3 +476,9 @@ table.board{border-collapse:separate;border-spacing:0;width:100%;min-width:760px
   body.printing{padding:0!important;background:#fff!important}
   .ws-page{-webkit-print-color-adjust:exact;print-color-adjust:exact}
 }
+
+.cell1{display:flex;flex-direction:column;gap:3px;padding:5px 4px;border-radius:6px;background:var(--bg);border:1px solid var(--line);text-decoration:none;align-items:stretch}
+.cell1 i{display:block;height:8px;border-radius:3px;background:linear-gradient(90deg,var(--green) var(--w),color-mix(in srgb,var(--line) 70%,transparent) var(--w))}
+.cell1 small{font-size:10.5px;color:var(--muted);text-align:center}
+.cell1.cur{border-color:var(--gold);box-shadow:0 0 0 2px var(--gold-soft)}
+.arch{padding:10px 14px;margin-bottom:8px}.arch summary{cursor:pointer}.arch .mtab{margin-top:8px;min-width:0}

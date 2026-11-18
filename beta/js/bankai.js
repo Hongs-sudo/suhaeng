@@ -1,4 +1,4 @@
-import { unitsOf } from "./curriculum.js?v=8";
+import { unitsOf } from "./curriculum.js?v=9";
 // 문제은행용 분석 서버 호출: PDF 쪽에서 문항 뽑기(/extract), 변형 문항 만들기(/variant)
 const post = async (store, path, body) => {
   const cfg = window.APP_CONFIG;

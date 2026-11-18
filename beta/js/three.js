@@ -1,9 +1,9 @@
 // 3단계(Preview · 테스트 · Review) 화면: 홈, 채점, 회차·세트, 세트 편집, Review 구성, 문제은행, 학습지 인쇄
-import { STAGES, TERM, termKey, termLabel, unitsOf, unitOf, setKey, resultKey, isLegacyTerm } from "./curriculum.js?v=8";
-import { BANK, RES, ensureBank, getFigure } from "./bankcache.js?v=8";
-import { requestExtract, requestVariant } from "./bankai.js?v=8";
-import { filesToJpegs, shrinkBlob, filesToPageBlobs, blobToDataURL } from "./analyze.js?v=8";
-import { esc, fmt } from "./report.js?v=8";
+import { STAGES, TERM, termKey, termLabel, unitsOf, unitOf, setKey, resultKey, isLegacyTerm } from "./curriculum.js?v=9";
+import { BANK, RES, ensureBank, getFigure } from "./bankcache.js?v=9";
+import { requestExtract, requestVariant } from "./bankai.js?v=9";
+import { filesToJpegs, shrinkBlob, filesToPageBlobs, blobToDataURL } from "./analyze.js?v=9";
+import { esc, fmt } from "./report.js?v=9";
 
 let C = null; // main.js 가 넘겨 주는 공통 도구 {S, main, $, $$, toast, busy, recs, stu, sheet, closeSheet, scored, isAdmin}
 export function initThree(ctx) { C = ctx; }
@@ -47,6 +47,7 @@ const filled = a => (a || []).filter(Boolean).length;
 
 /* ================================================================ 홈 */
 export function viewHome() {
+  if (isLegacyTerm()) return viewHomeTest();
   const { S, main } = C;
   const studs = active();
   const cr = { 1: curRound(1), 2: curRound(2), 3: curRound(3) };
@@ -134,13 +135,14 @@ export function viewHome() {
 /* ================================================================ 채점 (Preview · 테스트 · Review) */
 export function viewGrade(stage = "preview", g = 0, r = 0) {
   const { S, main } = C;
+  if (isLegacyTerm()) stage = "test"; // 2026년은 테스트만
   const G = S.gr = S.gr || { mine: null };
   g = g || G.g || 1; r = r || curRound(g); G.g = g;
   if (G.mine == null) G.mine = S.students.some(s => s.teacher === S.user.name);
   let list = active().filter(s => s.grade === g && (!G.mine || s.teacher === S.user.name)).sort((a, b) => a.name.localeCompare(b.name, "ko"));
   const pend = S.students.reduce((a, s) => a + Object.values(C.recs(s.id)).filter(x => x && x.pending).length, 0);
   const head = `<div class="page-head"><h1>채점</h1><span class="sp"></span><span class="muted small">${termLabel()}</span></div>
-    <div class="stage-tabs">${STAGES.map(st => `<a href="#/grade/${st.key}/${g}/${r}" aria-current="${st.key === stage ? "page" : "false"}"><i>STEP ${st.step}</i>${st.name}</a>`).join("")}</div>
+    <div class="stage-tabs" ${isLegacyTerm() ? "hidden" : ""}>${STAGES.map(st => `<a href="#/grade/${st.key}/${g}/${r}" aria-current="${st.key === stage ? "page" : "false"}"><i>STEP ${st.step}</i>${st.name}</a>`).join("")}</div>
     <div class="list-tools"><div class="chips">${[1, 2, 3].map(x => `<a class="chipa" href="#/grade/${stage}/${x}/${curRound(x)}" aria-pressed="${x === g}">중${x}</a>`).join("")}
       <select class="input sm" id="rsel" aria-label="회차">${Array.from({ length: 10 }, (_, i) => `<option value="${i + 1}" ${i + 1 === r ? "selected" : ""}>${i + 1}회 · ${esc(unitOf(g, i + 1))}</option>`).join("")}</select>
       <button class="chipb" id="mine" aria-pressed="${!!G.mine}">내 학생만</button></div></div>`;
@@ -213,7 +215,7 @@ export async function viewSets(sem = 0, g = 0) {
   sem = sem || V.sem || TERM.sem; g = g || V.g || 1; V.sem = sem; V.g = g;
   main.innerHTML = `<div class="page-head"><h1>회차 · 세트</h1></div><p class="muted">문제은행을 불러오는 중…</p>`;
   await ensureBank(S.store).catch(() => {});
-  const cur = sem === TERM.sem;
+  const cur = sem === TERM.sem && !isLegacyTerm(); // 2026년은 Review 없이 테스트만
   const studs = active().filter(s => s.grade === g);
   const rows = unitsOf(g, sem).map((u, i) => {
     const r = i + 1, st = setOf(sem, g, r);
@@ -229,7 +231,7 @@ export async function viewSets(sem = 0, g = 0) {
     <div class="list-tools"><div class="chips">${[1, 2].map(x => `<a class="chipa" href="#/sets/${x}/${g}" aria-pressed="${x === sem}">${x}학기${x === TERM.sem ? " (진행 중)" : ""}</a>`).join("")}
       <span style="width:8px"></span>${[1, 2, 3].map(x => `<a class="chipa" href="#/sets/${sem}/${x}" aria-pressed="${x === g}">중${x}</a>`).join("")}</div></div>
     <div class="tblwrap"><table class="board"><thead><tr><th>회차</th><th>단원</th><th>Preview</th><th>테스트</th><th>Review ${cur ? `<small class="muted">(${termLabel()})</small>` : ""}</th><th></th></tr></thead><tbody>${rows}</tbody></table></div>
-    ${sem === TERM.sem && isLegacyTerm() ? `<p class="small muted">${termLabel()} 테스트는 지금까지처럼 2026년 수행평가 시험지 · 채점기준표로 채점해요. 새 세트는 2027년부터 쓰여요.</p>` : ""}`;
+    ${isLegacyTerm() ? `<p class="small muted">${termLabel()}은 테스트만 진행해요. 여기서 만든 세트는 2027년부터 Preview · 테스트 · Review로 쓰여요.</p>` : ""}`;
 }
 
 /* ---------------------------------------------------------------- 세트 편집 */
@@ -443,7 +445,8 @@ export async function buildReview(sid, r) {
   const items = [];
   for (const p of plan) {
     const rr = p.kind === "next" ? r + 1 : r;
-    let pool = Object.values(BANK.items).filter(it => it.grade === g && it.sem === sem && !it.testOnly && it.status !== "check" && !used.has(it.id) && (it.round === rr || it.unit === unitOf(g, rr)));
+    // 2026년 2학기에는 기존 수행평가 문항이 곧 그 회차 테스트이므로 Review에 그대로 넣지 않는다 (변형만 사용)
+    let pool = Object.values(BANK.items).filter(it => it.grade === g && it.sem === sem && !it.testOnly && it.status !== "check" && !used.has(it.id) && (it.round === rr || it.unit === unitOf(g, rr)) && !(isLegacyTerm() && (it.source || {}).type === "old"));
     const byC = pool.filter(it => it.concept && (it.concept === p.concept || it.concept.includes(p.concept) || p.concept.includes(it.concept)));
     // 취약 개념 자리는 같은 개념 문항만 (없으면 비워 두고 AI 변형으로 채운다), 나머지 자리는 같은 회차 아무 문항
     pool = p.kind === "weak" ? byC : [...byC, ...pool.filter(it => !byC.includes(it))];
@@ -531,8 +534,11 @@ export async function viewReviewOne(sid, r) {
   // 은행에 맞는 문항이 없으면, 같은 개념의 Preview·테스트 문항을 숫자 변형해 채운다 (서버가 따로 다시 풀어 검산)
   async function fillAI(i) {
     const p = slotPlan()[i], set = setOf(TERM.sem, s.grade, r);
+    const same = Object.values(BANK.items).filter(it => it.grade === s.grade && it.sem === TERM.sem && it.round === (p.kind === "next" ? r + 1 : r));
     const base = [...(set.preview || []), ...(set.test || [])].map(id => BANK.items[id]).find(it => it && it.concept === p.concept && !it.testOnly)
       || [...(set.preview || []), ...(set.test || [])].map(id => BANK.items[id]).find(it => it && it.concept === p.concept)
+      || same.find(it => it.concept === p.concept && (it.source || {}).type === "old") || same.find(it => it.concept === p.concept)
+      || same.find(it => it.concept && p.concept && (it.concept.includes(p.concept) || p.concept.includes(it.concept)))
       || BANK.items[(set.preview || []).find(Boolean)] || Object.values(BANK.items).find(it => it.grade === s.grade && it.sem === TERM.sem && it.round === r);
     if (!base) { C.toast("변형할 원본 문항이 없어요. 먼저 문제은행에 문항을 넣어 주세요.", 3500); return false; }
     try {
@@ -579,7 +585,7 @@ export async function viewBank() {
     const sel = (id, opts, v) => `<select class="input sm" id="${id}">${opts.map(([val, t]) => `<option value="${val}" ${String(v) === String(val) ? "selected" : ""}>${t}</option>`).join("")}</select>`;
     main.innerHTML = `<div class="page-head"><h1>문제은행</h1><span class="sp"></span><button class="btn sm" id="imp">PDF · 사진에서 가져오기</button><button class="btn sm fill" id="new">새 문항</button></div>
       <div class="src4">${[["textbook", "교과서"], ["db", "내 문제 DB"], ["old", "기존 수행"], ["ai", "AI 변형"]].map(([k, n]) => `<button class="srcb" data-src="${k}" aria-pressed="${F.src === k}"><b class="num">${cnt(k).toLocaleString()}</b><small>${n}</small></button>`).join("")}</div>
-      <div class="list-tools bankf">${sel("f-g", [[0, "전 학년"], [1, "중1"], [2, "중2"], [3, "중3"]], F.g)}${sel("f-s", [[0, "전 학기"], [1, "1학기"], [2, "2학기"]], F.sem)}${sel("f-r", [[0, "전 회차"], ...Array.from({ length: 10 }, (_, i) => [i + 1, `${i + 1}회`])], F.r)}${sel("f-d", [[0, "전 난이도"], [1, "★"], [2, "★★"], [3, "★★★"]], F.d)}
+      <div class="bankf">${sel("f-g", [[0, "전 학년"], [1, "중1"], [2, "중2"], [3, "중3"]], F.g)}${sel("f-s", [[0, "전 학기"], [1, "1학기"], [2, "2학기"]], F.sem)}${sel("f-r", [[0, "전 회차"], ...Array.from({ length: 10 }, (_, i) => [i + 1, `${i + 1}회`])], F.r)}${sel("f-d", [[0, "전 난이도"], [1, "★"], [2, "★★"], [3, "★★★"]], F.d)}
         <input class="input sm" id="f-q" type="search" placeholder="개념·본문·출처 검색" value="${esc(F.q)}"><span class="small muted num">${list.length.toLocaleString()}문항</span></div>
       <div class="qlist">${list.slice(F.page * per, F.page * per + per).map(it => `<div class="q"><div class="n small">${it.grade ? `중${it.grade}` : ""}<br>${it.sem ? it.sem + "-" : ""}${it.round || "–"}</div><div class="qbd"><div class="qb">${bodyHTML(it.body)}</div>${figTag(it)}
         <div class="meta">${srcChip(it)}${stars(it.diff)}<span class="muted small">${esc(it.concept || "")}</span>${it.testOnly ? `<span class="chip">테스트 전용</span>` : ""}${it.status === "check" ? `<span class="chip c-warn">검산 확인 필요</span>` : ""}${it.status === "draft" ? `<span class="chip c-warn">확인 전</span>` : ""}</div>
@@ -710,4 +716,126 @@ export async function printKey({ title, sub, ids }) {
   printHost(`<section class="ws-page"><header class="ws-h"><div><img src="img/logo-black.png" alt="수학도서관"><div class="ws-t">${esc(title)}<small>${esc(sub)} · 선생님용</small></div></div></header>
     <table class="ws-key"><thead><tr><th>번호</th><th>정답</th><th>채점기준 (5점)</th></tr></thead><tbody>${items.map((it, i) => `<tr><td class="c">${i + 1}</td><td>${bodyHTML(it.answer)}</td><td>${bodyHTML(it.criteria)}</td></tr>`).join("")}</tbody></table>
     <footer class="ws-f"><span>수학도서관 · 수행평가 · 서술형 프로그램</span><span>정답 · 채점기준</span></footer></section>`);
+}
+
+/* ================================================================ 기존 수행평가 문항 한 번에 넣기 (관리) */
+// seed/old-2026-2.json : 2026년 2학기 중1~중3 수행평가 300문항 (본문 · 정답 · 채점기준 · 그림)
+export async function importOldSeed(btn, onDone) {
+  C.busy(btn, true, "불러오는 중");
+  try {
+    const res = await fetch("seed/old-2026-2.json?v=1"); if (!res.ok) throw new Error("문항 파일을 찾지 못했어요");
+    const seed = await res.json();
+    await ensureBank(C.S.store).catch(() => {});
+    let n = 0, skip = 0;
+    for (const it of seed.items) {
+      const { id, fig, ...d } = it;
+      if (BANK.items[id]) { skip++; continue; }
+      if (fig) { await C.S.store.setX("figs", id, { data: fig }, false); d.figId = id; BANK.figs[id] = fig; }
+      await C.S.store.setX("items", id, { ...d, by: C.S.user.email, at: Date.now() }, false);
+      BANK.items[id] = { id, ...d }; n++;
+      if (n % 10 === 0) btn.innerHTML = `<span class="spinner"></span> ${n + skip} / ${seed.items.length}`;
+    }
+    C.toast(`${n}문항을 넣었어요${skip ? ` (이미 있던 ${skip}문항은 건너뜀)` : ""}`, 4000);
+    onDone && onDone();
+  } catch (e) { C.toast("넣지 못했어요: " + e.message, 4000); }
+  C.busy(btn, false);
+}
+
+/* 2026년(테스트만 진행) 홈 */
+function viewHomeTest() {
+  const { S, main } = C;
+  const studs = active();
+  const cr = { 1: curRound(1), 2: curRound(2), 3: curRound(3) };
+  const atCur = s => cr[s.grade];
+  const nT = studs.filter(s => testRec(s.id, atCur(s))).length;
+  const nA = studs.filter(s => (testRec(s.id, atCur(s)) || {}).analyzed).length;
+  const pend = studs.reduce((a, s) => a + Object.values(C.recs(s.id)).filter(x => x && x.pending).length, 0);
+  const absent = studs.filter(s => !testRec(s.id, atCur(s)) && studs.some(o => o.grade === s.grade && testRec(o.id, atCur(o))));
+  const grid = [1, 2, 3].map(g => { const gs = studs.filter(s => s.grade === g), n = gs.length || 1;
+    return `<span class="g">중${g}</span>` + Array.from({ length: 10 }, (_, i) => { const r = i + 1, f = gs.filter(s => testRec(s.id, r)).length / n;
+      return `<a class="cell1 ${r === cr[g] ? "cur" : ""}" href="#/grade/test/${g}/${r}" title="중${g} ${r}회"><i style="--w:${Math.round(f * 100)}%"></i><small class="num">${Math.round(f * 100)}%</small></a>`; }).join(""); }).join("");
+  const mine = mineOrAll(studs).slice().sort((a, b) => a.grade - b.grade || a.name.localeCompare(b.name, "ko"));
+  const avg = (() => { const v = studs.map(s => testScore(s.id, atCur(s))).filter(x => x != null); return v.length ? v.reduce((a, b) => a + b, 0) / v.length : null; })();
+  main.innerHTML = `<div class="home">
+    <div class="hello"><div><h1>이번 회차 · ${termLabel()}</h1><div class="muted small">${[1, 2, 3].map(g => `중${g} ${cr[g]}회 ${esc(unitOf(g, cr[g]))}`).join(" · ")}</div></div>
+      <span class="pill gold">Preview · Review는 2027년부터</span></div>
+    <div class="home-grid"><div class="home-main">
+      <div class="todos">
+        <a class="tdc" href="#/grade/test"><b class="num">${nT}<small>/${studs.length}</small></b><span>이번 회차 응시</span><small>분석 완료 ${nA}명</small></a>
+        <a class="tdc ${pend ? "hot" : ""}" href="#/bulk"><b class="num">${pend}</b><span>채점 확인 대기</span><small>AI 분석 끝 · 확인하고 저장</small></a>
+        <a class="tdc ${absent.length ? "hot" : ""}" href="#/grade/test"><b class="num">${absent.length}</b><span>테스트 미응시</span><small>결시 · 보충 일정 잡기</small></a>
+        <a class="tdc" href="#/reports"><b class="num">${cr[1] <= 5 ? 1 : 2}<small>차</small></b><span>다음 리포트</span><small>${cr[1] <= 5 ? "1~5회 끝나면" : "6~10회 끝나면"}</small></a>
+      </div>
+      <section class="card prog"><div class="hd"><h2>학년별 테스트 진행</h2><span class="leg"><span>칸마다 응시한 학생 비율</span><span><i class="lg cur"></i>지금 회차</span></span></div>
+        <div class="tblwrap"><div class="prg">${"<span></span>" + Array.from({ length: 10 }, (_, i) => `<span class="h">${i + 1}</span>`).join("")}${grid}</div></div></section>
+      <section class="card"><div class="hd2"><h2>${mine.some(s => s.teacher === S.user.name) ? "내 학생" : "학생"} <small class="muted">· 지금 회차</small></h2><a class="btn sm" href="#/students">학생 전체</a></div>
+        <div class="tblwrap"><table class="stu3"><thead><tr><th>학생</th><th>회차</th><th>테스트</th><th>시험지 분석</th><th>다음 할 일</th></tr></thead><tbody>
+        ${mine.slice(0, 30).map(s => { const r = atCur(s), x = testRec(s.id, r);
+          const [t, h, c] = !x ? ["테스트 입력", `#/s/${s.id}/${r}`, "c"] : x.pending ? ["채점 확인", `#/a/${s.id}/${r}`, "a"] : !x.analyzed && C.scored(x) ? ["시험지 올리기", `#/s/${s.id}/${r}`, "b"] : [`${Math.min(10, r + 1)}회 테스트`, `#/s/${s.id}/${Math.min(10, r + 1)}`, "b"];
+          return `<tr><td><a href="#/s/${s.id}"><b>${esc(s.name)}</b> <small class="muted">중${s.grade}</small></a></td><td class="num">${r}회</td><td class="s num">${x ? (C.scored(x) ? `${fmt(x.score)}<small>/50</small>` : esc(x.status || "")) : "—"}</td><td>${x && x.analyzed ? "완료" : x && x.pending ? "확인 대기" : "—"}</td><td><a class="nx ${c}" href="${h}">${t}</a></td></tr>`; }).join("")}
+        </tbody></table></div></section>
+    </div>
+    <aside class="home-side">
+      <section class="card"><h2>빠른 실행</h2><div class="quick"><a class="btn fill" href="#/students">점수 입력</a><a class="btn" href="#/bulk">시험지 스캔 올리기</a><a class="btn" href="#/overview">현황표</a><a class="btn" href="#/reports">리포트</a></div></section>
+      <section class="card"><h2>${termLabel()} 일정</h2><div class="cal">${[["9월", "1~2회"], ["10월", "3~5회"], ["10월 말", "1차 리포트 (1~5회)", 1], ["11월", "6~9회"], ["12월", "10회"], ["12월 말", "2차 리포트 (6~10회)", 1]].map(([a, b, rp]) => `<div><span>${a}</span><span class="${rp ? "rep" : ""}">${b}</span></div>`).join("")}</div></section>
+      <section class="card"><h2>지금 회차 테스트 평균</h2><div class="minibar"><span>테스트</span><span class="b"><span style="width:${avg == null ? 0 : Math.round(avg * 2)}%"></span></span><b class="num">${avg == null ? "–" : fmt(avg)}</b></div></section>
+      <section class="card"><h2>2027년 준비</h2><p class="small muted" style="margin:4px 0 8px">Preview · 테스트 · Review 세트와 문제은행은 지금부터 미리 만들어 둘 수 있어요.</p><div class="quick"><a class="btn" href="#/sets/1/1">1학기 세트</a><a class="btn" href="#/bank">문제은행</a></div></section>
+    </aside></div></div>`;
+}
+
+/* ================================================================ 학기 넘기기 (관리) */
+export const nextTerm = (t = TERM) => t.sem === 2 ? { year: t.year + 1, sem: 1 } : { year: t.year, sem: 2 };
+// 1) 지금 학기 테스트 기록 · 시험지 분석 · 리포트 차시 설정을 보관함(archive)으로 옮기고 지운다
+// 2) 2학기 → 다음 해 1학기면 학년을 올리고 중3은 '졸업'
+// 3) 진행 학기를 바꾼다
+export async function rolloverTerm(btn, onStep) {
+  const { S } = C, st = S.store, from = { ...TERM }, to = nextTerm(from), fk = termKey(from);
+  const step = t => { btn.innerHTML = `<span class="spinner"></span> ${t}`; onStep && onStep(t); };
+  C.busy(btn, true, "준비 중");
+  try {
+    const recsAll = await st.listRecords();
+    const drafts = await st.listX("drafts").catch(() => []);
+    const sids = new Set([...Object.keys(recsAll), ...S.students.map(s => s.id)]);
+    let n = 0;
+    for (const sid of sids) {
+      const rounds = recsAll[sid] || {};
+      const an = await st.listAnalyses(sid).catch(() => ({}));
+      const dr = drafts.filter(d => d.id.startsWith(sid + "_"));
+      if (!Object.keys(rounds).length && !Object.keys(an).length && !dr.length) continue;
+      const s = C.stu(sid) || {};
+      step(`기록 보관 ${++n}`);
+      await st.setX("archive", `${sid}_${fk}`, { sid, term: fk, year: from.year, sem: from.sem, name: s.name || "", grade: s.grade || 0, school: s.school || "", rounds, analyses: an, drafts: Object.fromEntries(dr.map(d => [d.id, d])), at: Date.now() }, false);
+    }
+    // 보관이 모두 끝난 뒤에 지운다
+    step("새 학기 칸 준비");
+    for (const sid of Object.keys(recsAll)) await st.delX("records", sid);
+    for (const sid of sids) { const an = await st.listAnalyses(sid).catch(() => ({})); for (const r of Object.keys(an)) await st.delX("analyses", `${sid}_${r}`); }
+    for (const d of drafts) await st.delX("drafts", d.id);
+    for (const j of await st.listJobs().catch(() => [])) await st.deleteJob(j.id);
+    if (from.sem === 2) {
+      step("학년 올리기");
+      for (const s of S.students) {
+        if (s.status === "졸업" || s.status === "퇴원") continue;
+        const d = s.grade >= 3 ? { status: "졸업", graduatedAt: Date.now() } : { grade: s.grade + 1 };
+        await st.saveStudent({ id: s.id, ...d });
+      }
+    }
+    await st.setX("config", "term", { year: to.year, sem: to.sem, prev: fk, at: Date.now(), by: S.user.email }, false);
+    C.toast(`${termLabel(to)}로 넘겼어요. 앱을 다시 불러올게요.`, 3000);
+    setTimeout(() => location.reload(), 1500);
+  } catch (e) { C.toast("넘기지 못했어요: " + e.message + " (보관한 기록은 남아 있어요. 다시 눌러 이어 할 수 있어요)", 6000); C.busy(btn, false); }
+}
+
+// 학생 화면 아래: 지난 학기 기록 (보관함)
+export async function paintArchive(el, sid) {
+  const rows = await C.S.store.listX("archive", [["sid", "==", sid]]).catch(() => []);
+  if (!rows.length) { el.hidden = true; return; }
+  rows.sort((a, b) => b.term.localeCompare(a.term));
+  el.hidden = false;
+  el.innerHTML = `<h2 class="h3">지난 학기 기록</h2>` + rows.map(a => {
+    const ks = Object.keys(a.rounds || {}).map(Number).sort((x, y) => x - y);
+    const v = ks.map(k => a.rounds[k]).filter(x => x && typeof x.score === "number" && x.status !== "결시");
+    return `<details class="card arch"><summary><b>${a.year}년 ${a.sem}학기</b> <span class="muted small">중${a.grade} · 응시 ${v.length}회 · 평균 ${v.length ? fmt(v.reduce((s, x) => s + x.score, 0) / v.length) : "–"}</span></summary>
+      <table class="mtab"><thead><tr><th>회차</th><th>단원</th><th class="num">점수</th><th>분석</th></tr></thead><tbody>${ks.map(k => { const x = a.rounds[k]; return `<tr><td>${k}회</td><td>${esc(unitOf(a.grade, k, a.sem))}</td><td class="num">${x && typeof x.score === "number" ? fmt(x.score) : esc((x || {}).status || "")}</td><td>${(a.analyses || {})[k] ? "있음" : ""}</td></tr>`; }).join("")}</tbody></table></details>`;
+  }).join("");
 }

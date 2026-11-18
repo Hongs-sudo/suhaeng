@@ -1,7 +1,7 @@
 // 시험지 일괄 올리기: 여러 학생 시험지를 한 파일로 올려 학생·회차별로 나누고 차례로 분석
-import { unitOf } from "./curriculum.js?v=8";
-import { filesToPageBlobs, blobToDataURL, shrinkBlob, requestIdentify, requestAnalysis } from "./analyze.js?v=8";
-import { esc, fmt } from "./report.js?v=8";
+import { unitOf } from "./curriculum.js?v=9";
+import { filesToPageBlobs, blobToDataURL, shrinkBlob, requestIdentify, requestAnalysis } from "./analyze.js?v=9";
+import { esc, fmt } from "./report.js?v=9";
 
 const B = { pages: [], thumbs: [], reads: [], groups: [], grade: 0, round: 0, fileName: "", running: null };
 const ID_BATCH = 8, ID_PARALLEL = 2, AN_PARALLEL = 2, MAX_PAGES = 6;

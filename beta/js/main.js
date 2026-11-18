@@ -1,13 +1,13 @@
 // 수행평가·서술형 프로그램 관리 앱
-import { createStore, DEMO, newToken } from "./store.js?v=8";
-import { unitsOf, unitOf, TERM, termLabel } from "./curriculum.js?v=8";
-import { rubricFor, filesToJpegs, requestAnalysis, requestComment, ERROR_TYPES } from "./analyze.js?v=8";
-import { buildReport, renderReport, reportToBlob, reportToHTML, classAverages, takenRounds, defaultParts, esc, fmt, unitBr } from "./report.js?v=8";
-import { parseWorkbook } from "./excel-import.js?v=8";
-import { viewBulk } from "./bulk.js?v=8";
-import { initThree, viewHome, viewGrade, viewSets, viewSet, viewReviewList, viewReviewOne, viewBank } from "./three.js?v=8";
-import { loadSets, loadResults, RES } from "./bankcache.js?v=8";
-import { setTerm, termKey } from "./curriculum.js?v=8";
+import { createStore, DEMO, newToken } from "./store.js?v=9";
+import { unitsOf, unitOf, TERM, termLabel } from "./curriculum.js?v=9";
+import { rubricFor, filesToJpegs, requestAnalysis, requestComment, ERROR_TYPES } from "./analyze.js?v=9";
+import { buildReport, renderReport, reportToBlob, reportToHTML, classAverages, takenRounds, defaultParts, esc, fmt, unitBr } from "./report.js?v=9";
+import { parseWorkbook } from "./excel-import.js?v=9";
+import { viewBulk } from "./bulk.js?v=9";
+import { initThree, viewHome, viewGrade, viewSets, viewSet, viewReviewList, viewReviewOne, viewBank, importOldSeed, rolloverTerm, nextTerm, paintArchive } from "./three.js?v=9";
+import { loadSets, loadResults, RES } from "./bankcache.js?v=9";
+import { setTerm, termKey } from "./curriculum.js?v=9";
 
 const CFG = window.APP_CONFIG;
 const $ = (s, el = document) => el.querySelector(s);
@@ -188,7 +188,7 @@ function renderNotRegistered() {
 function viewList() {
   const f = S.filter;
   const q = f.q.trim();
-  let list = S.students.filter(s => (!f.mine || s.teacher === S.user.name) && (!f.grade || s.grade === f.grade) && (!q || s.name.includes(q) || (s.school || "").includes(q)));
+  let list = S.students.filter(s => s.status !== "졸업" && (!f.mine || s.teacher === S.user.name) && (!f.grade || s.grade === f.grade) && (!q || s.name.includes(q) || (s.school || "").includes(q)));
   list.sort((a, b) => (a.status !== "재원") - (b.status !== "재원") || lastAt(b.id) - lastAt(a.id) || a.name.localeCompare(b.name, "ko"));
   const nPend = S.students.filter(s => !f.mine || s.teacher === S.user.name).reduce((a, s) => a + Object.values(recs(s.id)).filter(x => x && x.pending).length, 0);
   main.innerHTML = `<div class="page-head"><h1>학생</h1><span class="sp"></span><a class="btn sm" href="#/overview">현황표</a>${nPend ? (() => { const q0 = pendingQueue()[0]; return q0 ? `<a class="btn sm gold" href="#/a/${q0.id}/${q0.k}">확인 대기 <b class="num">${nPend}</b>건 확인하기</a>` : ""; })() : ""}<a class="btn sm" href="#/bulk">시험지 일괄 올리기</a><span class="muted small">${list.length}명</span></div>
@@ -230,9 +230,11 @@ function viewStudent(id, openRound) {
       return `<button class="rnd ${cls}" data-r="${k}"><span class="no">${k}회</span><span class="u">${unitBr(g, k)}${sub}</span>${right}</button>`;
     }).join("")}</div>
     <div class="stu-actions"><a class="btn" href="#/r/${id}/1">리포트 보기</a></div>
+    <div id="arch" hidden></div>
     <p class="small muted">회차는 순서와 상관없이 아무 칸이나 눌러 입력할 수 있습니다. 리포트는 응시한 날짜 순서대로 5회씩 묶습니다.</p></div>`;
   $(".rounds").onclick = e => { const b = e.target.closest(".rnd"); if (b) openInput(id, +b.dataset.r); };
   $("#edit-stu").onclick = () => openStudentForm(s);
+  paintArchive($("#arch"), id);
   if (openRound) openInput(id, openRound);
 }
 
@@ -319,7 +321,7 @@ function openStudentForm(s) {
     <label class="small muted">이름<input class="input" id="f-n" value="${esc(s.name)}"></label>
     <label class="small muted">학교<input class="input" id="f-s" value="${esc(s.school)}" placeholder="예: 월촌"></label>
     <div class="row"><label class="small muted" style="flex:1">학년<select class="input" id="f-g">${[1, 2, 3].map(g => `<option value="${g}" ${s.grade === g ? "selected" : ""}>중${g}</option>`).join("")}</select></label>
-    <label class="small muted" style="flex:1">상태<select class="input" id="f-st">${["재원", "휴원", "퇴원"].map(v => `<option ${s.status === v ? "selected" : ""}>${v}</option>`).join("")}</select></label></div>
+    <label class="small muted" style="flex:1">상태<select class="input" id="f-st">${["재원", "휴원", "퇴원", "졸업"].map(v => `<option ${s.status === v ? "selected" : ""}>${v}</option>`).join("")}</select></label></div>
     <label class="small muted">담당 선생님<input class="input" id="f-t" list="tlist" value="${esc(s.teacher || "")}"><datalist id="tlist">${teacherNames().map(n => `<option value="${esc(n)}">`).join("")}</datalist></label>
     <div class="acts"><button class="btn" data-close>취소</button><button class="btn fill" id="f-sv">저장</button></div>
     ${!isNew && isAdmin() ? `<button class="btn sm danger" id="f-del" style="align-self:flex-start">학생 삭제</button>` : ""}`);
@@ -485,7 +487,7 @@ function printReport(d) {
 function viewOverview() {
   const o = S.ov, g = o.grade;
   if (o.teacher === "" && !isAdmin() && S.students.some(s => s.teacher === S.user.name)) o.teacher = S.user.name;
-  const list = S.students.filter(s => s.grade === g && (!o.teacher || s.teacher === o.teacher) && (o.status === "전체" || s.status === "재원"));
+  const list = S.students.filter(s => s.grade === g && s.status !== "졸업" && (!o.teacher || s.teacher === o.teacher) && (o.status === "전체" || s.status === "재원"));
   const cs = Array(11).fill(0), cn = Array(11).fill(0);
   const rows = list.map(s => {
     const r = recs(s.id), v = [];
@@ -760,6 +762,17 @@ async function viewAdmin() {
       <p class="small muted" style="margin:0">학생 ${S.students.length}명 · 재원 ${S.students.filter(s => s.status === "재원").length}명. 학생 정보 수정·삭제는 학생 화면의 '정보 수정'에서 합니다.</p>
       <div class="row" style="display:flex;gap:8px;flex-wrap:wrap"><button class="btn sm" id="addst">학생 추가</button><button class="btn sm" id="backup">백업 파일 내려받기</button></div>
     </section>
+    <section class="card"><h2>문제은행 · 진행 학기</h2>
+      <p class="small muted" style="margin:0">지금 진행 중인 학기: <b>${termLabel()}</b>. 테스트 점수 · 시험지 분석 · 리포트는 이 학기에 쌓여요.</p>
+      <p class="small muted" style="margin:0">2026년 2학기 중1~중3 수행평가 300문항(본문 · 정답 · 채점기준 · 그림)을 문제은행에 넣습니다. 이미 넣은 문항은 건너뛰어요.</p>
+      <button class="btn sm" id="seedold" style="align-self:flex-start">2026년 2학기 수행평가 문항 넣기</button>
+    </section>
+    <section class="card"><h2>학기 넘기기</h2>
+      <p class="small muted" style="margin:0"><b>${termLabel()}</b> → <b>${termLabel(nextTerm())}</b>. 지금 학기의 테스트 점수 · 시험지 분석 · 리포트 차시 설정을 보관함으로 옮기고, 새 학기 1~10회를 빈 칸으로 시작해요. 지난 기록은 학생 화면의 '지난 학기 기록'에서 볼 수 있고, 이미 보낸 리포트 링크는 그대로 열려요.${TERM.sem === 2 ? " 2학기에서 넘길 때는 <b>학년을 하나씩 올리고, 중3은 '졸업'으로 바꿔 목록에서 숨겨요.</b>" : ""}${nextTerm().year >= 2027 ? " 새 학기부터 Preview · Review가 켜져요." : ""}</p>
+      <p class="small muted" style="margin:0">2차 리포트를 모두 보낸 뒤에 해 주세요. 되돌릴 수 없어요.</p>
+      <input class="input" id="rollconf" placeholder="넘기려면 '학기 넘기기'라고 입력" aria-label="학기 넘기기 확인">
+      <button class="btn sm danger" id="roll" disabled style="align-self:flex-start">${termLabel(nextTerm())}로 넘기기</button>
+    </section>
     <section class="card"><h2>학기 정리</h2>
       <p class="small muted" style="margin:0">보관 중인 시험지 스캔 <b class="num">${scanCount}</b>장. 학기가 끝나면 스캔 원본만 일괄 삭제합니다. 점수와 분석 결과, 리포트는 남습니다.</p>
       <input class="input" id="delconf" placeholder="삭제하려면 '스캔 삭제'라고 입력" aria-label="삭제 확인">
@@ -767,6 +780,9 @@ async function viewAdmin() {
       ${DEMO ? `<button class="btn sm" id="reset" style="align-self:flex-start">데모 데이터 처음으로</button>` : ""}
     </section></div>`;
   paintTeachers();
+  $("#seedold").onclick = e => importOldSeed(e.currentTarget);
+  $("#rollconf").oninput = e => $("#roll").disabled = e.target.value.trim() !== "학기 넘기기";
+  $("#roll").onclick = e => rolloverTerm(e.currentTarget);
   // 선생님 명단
   let cands = [];
   const showCands = () => {

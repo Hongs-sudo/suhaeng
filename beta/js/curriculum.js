@@ -1,6 +1,6 @@
 // 학기·회차 단원표와 '지금 진행 중인 학기' 설정
 // 2학기 단원은 2026년에 쓴 수행평가 구성 그대로, 1학기는 2022 개정 교육과정 순서로 만든 단원표
-import { UNITS as U2, UNIT_LINES as L2 } from "./rubric.js?v=8";
+import { UNITS as U2, UNIT_LINES as L2 } from "./rubric.js?v=9";
 
 export const UNITS_BY_SEM = {
   1: {
