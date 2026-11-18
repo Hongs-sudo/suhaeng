@@ -43,6 +43,8 @@ export default {
       if (url.pathname === "/analyze") return json(await analyze(body, env));
       if (url.pathname === "/comment") return json(await comment(body, env));
       if (url.pathname === "/identify") return json(await identify(body, env));
+      if (url.pathname === "/extract") return json(await extract(body, env));
+      if (url.pathname === "/variant") return json(await variant(body, env));
       return json({ error: "알 수 없는 주소입니다." }, 404);
     } catch (e) {
       return json({ error: e.message || "분석 중 오류가 났습니다." }, 502);
@@ -140,7 +142,7 @@ async function analyze(b, env) {
   const imgs = Array.isArray(b.images) ? b.images.slice(0, 6) : [];
   if (!imgs.length) throw new Error("시험지 이미지가 없습니다.");
   const rubric = (b.rubric || []).map(it => `[${String(it.no).padStart(2, "0")}번] 정답·핵심 결론: ${it.answer}\n채점 기준(5점 만점): ${it.criteria}`).join("\n\n");
-  const text = `중학교 ${b.grade}학년 2학기 수학 수행평가·서술형 ${b.round}회 '${b.unit}' 시험지입니다. 10문항, 문항당 5점, 총 50점.
+  const text = `중학교 ${b.grade}학년 ${b.sem || 2}학기 수학 수행평가·서술형 ${b.round}회 '${b.unit}' 시험지입니다. 10문항, 문항당 5점, 총 50점.
 첨부한 이미지는 학생이 푼 답안지(${imgs.length}장)이며 선생님의 채점 표시(빨간 펜 ○, ×, 점수)가 있을 수 있습니다.
 ${b.entered != null ? `선생님이 입력한 이 시험 총점은 ${b.entered}점입니다.` : ""}
 
@@ -243,4 +245,110 @@ ${roster}
 
 반드시 record_pages 도구를 한 번 호출해 모든 쪽(P1~P${imgs.length})을 기록하세요.` });
   return claude(env, { max_tokens: 4000, tools: [ID_TOOL], messages: [{ role: "user", content }] }, "record_pages", env.ID_MODEL || env.MODEL);
+}
+
+/* ---------------- 문제은행: PDF·사진 쪽에서 문항 뽑기 ---------------- */
+const MATH_RULE = `수식 표기: 모든 수식·변수·숫자식은 \\( \\) 로 감싼 LaTeX로 쓴다. 예) \\(2x+3=7\\), \\(\\angle x=65^\\circ\\), \\(\\overline{AB}\\), \\(\\frac{1}{2}\\). 문장은 한국어 그대로.`;
+const EXTRACT_TOOL = {
+  name: "record_items",
+  description: "쪽 이미지에서 찾은 수학 문항을 하나씩 기록한다.",
+  input_schema: {
+    type: "object",
+    properties: {
+      items: {
+        type: "array",
+        items: {
+          type: "object",
+          properties: {
+            page: { type: "integer", description: "문항이 있는 이미지 번호 (P1 → 1)" },
+            body: { type: "string", description: "문항 본문 전체. 보기·조건·소문항 (1)(2) 포함. 그림 안의 글자는 쓰지 않음" },
+            answer: { type: "string", description: "정답. 쪽에 정답·해설이 없으면 직접 풀어서 쓰고, 확실하지 않으면 빈 문자열" },
+            criteria: { type: "string", description: "단계별 채점기준. '① … 2점\\n② … 2점\\n③ … 1점' 처럼 합 5점" },
+            concept: { type: "string", description: "핵심 개념 (짧게, 예: 평행선의 성질)" },
+            diff: { type: "integer", enum: [1, 2, 3], description: "난이도 1 기본 · 2 보통 · 3 어려움" },
+            round: { type: "integer", description: "아래 단원표에서 이 문항이 속하는 회차 번호. 모르면 0" },
+            figure: { type: ["array", "null"], items: { type: "number" }, description: "문항에 그림·그래프·표가 있으면 그 영역 [x0,y0,x1,y1] (쪽 전체를 0~1000으로 본 좌표). 없으면 null" }
+          },
+          required: ["page", "body", "answer", "criteria", "concept", "diff", "round", "figure"]
+        }
+      }
+    },
+    required: ["items"]
+  }
+};
+async function extract(b, env) {
+  const imgs = Array.isArray(b.images) ? b.images.slice(0, 4) : [];
+  if (!imgs.length) throw new Error("쪽 이미지가 없습니다.");
+  const units = Array.isArray(b.units) ? b.units : [];
+  const content = [];
+  imgs.forEach((d, i) => { content.push({ type: "text", text: `P${i + 1}` }); content.push({ type: "image", source: { type: "base64", media_type: "image/jpeg", data: d } }); });
+  content.push({ type: "text", text: `위 이미지는 중학교 ${b.grade}학년 ${b.sem}학기 수학 자료(교과서 · 문제집 · 수행평가 대비 학습지)의 쪽입니다.${b.hint ? ` 자료 이름: ${b.hint}.` : ""}
+문제은행에 넣을 수 있도록 쪽 안의 '문항'을 하나씩 나눠 기록하세요.
+- 개념 설명, 목차, 정답표만 있는 부분은 문항이 아닙니다. 예제·유제·연습문제·서술형 문항만 기록합니다.
+- 소문항 (1)(2)가 있는 문항은 하나의 문항으로 기록합니다.
+- ${MATH_RULE}
+- 서술형 수행평가용이므로 채점기준은 풀이 단계별로 합 5점이 되게 만듭니다. 쪽에 채점기준이 있으면 그대로 따릅니다.
+- 정답은 반드시 직접 풀어 확인합니다.
+${units.length ? `[단원표 (회차: 단원)]\n${units.map((u, i) => `${i + 1}: ${u}`).join("\n")}` : ""}
+
+반드시 record_items 도구를 한 번 호출해 모든 문항을 기록하세요. 문항이 없으면 빈 배열로 호출하세요.` });
+  return claude(env, { max_tokens: 12000, tools: [EXTRACT_TOOL], messages: [{ role: "user", content }] }, "record_items");
+}
+
+/* ---------------- 변형 문항 만들기 + 따로 다시 풀어 정답 검산 ---------------- */
+const VARIANT_TOOL = {
+  name: "record_variant",
+  description: "원래 문항을 바꾼 새 문항과 정답 · 채점기준을 기록한다.",
+  input_schema: {
+    type: "object",
+    properties: {
+      body: { type: "string" }, answer: { type: "string" },
+      criteria: { type: "string", description: "단계별 채점기준, 합 5점 ('① … 2점' 형식, 줄바꿈으로 구분)" },
+      concept: { type: "string" }
+    },
+    required: ["body", "answer", "criteria", "concept"]
+  }
+};
+const SOLVE_TOOL = {
+  name: "record_answer",
+  description: "문항을 풀어 최종 답을 기록한다.",
+  input_schema: { type: "object", properties: { answer: { type: "string" }, solvable: { type: "boolean", description: "주어진 정보만으로 답이 하나로 정해지면 true" } }, required: ["answer", "solvable"] }
+};
+const JUDGE_TOOL = {
+  name: "record_judgement",
+  description: "두 답이 수학적으로 같은지 판정한다.",
+  input_schema: { type: "object", properties: { same: { type: "boolean" }, note: { type: "string" } }, required: ["same", "note"] }
+};
+async function variant(b, env) {
+  const it = b.item || {};
+  if (!it.body) throw new Error("원래 문항이 없습니다.");
+  const how = b.type === "content"
+    ? "내용 변형: 같은 개념 · 같은 난이도를 묻되 상황 · 묻는 방식 · 조건을 바꾼 새 문항을 만든다. 숫자만 바꾸는 것은 안 된다."
+    : "숫자 변형: 문항의 구조와 묻는 것은 그대로 두고 수치만 바꾼다. 답이 깔끔한 수(정수나 간단한 분수)가 되게 고른다.";
+  const text = `중학교 ${b.grade}학년 수학 서술형 수행평가 '${b.unit || ""}' 단원 문항을 바탕으로 새 문항을 하나 만드세요.
+${how}
+${it.hasFigure ? "원래 문항에는 그림이 있습니다. 새 문항은 그림 없이도 풀 수 있게 조건을 글로 모두 쓰고, 꼭 그림이 필요하면 그림에 들어갈 내용을 [그림: …]으로 적으세요." : ""}
+- ${MATH_RULE}
+- 채점기준은 풀이 단계별로 합 5점.
+- 정답은 직접 풀어 확인한 값이어야 합니다.
+
+[원래 문항]
+${it.body}
+[원래 정답] ${it.answer || "(없음)"}
+[원래 채점기준]
+${it.criteria || "(없음)"}
+
+반드시 record_variant 도구를 한 번 호출하세요.`;
+  const v = await claude(env, { max_tokens: 3000, tools: [VARIANT_TOOL], messages: [{ role: "user", content: text }] }, "record_variant");
+  // 검산: 정답을 보여 주지 않고 새 문항만 따로 풀게 한 뒤 두 답이 같은지 비교
+  let verified = false, check = "";
+  try {
+    const s = await claude(env, { max_tokens: 2000, tools: [SOLVE_TOOL], messages: [{ role: "user", content: `다음 중학교 수학 문항을 풀어 최종 답만 기록하세요. 풀이는 머릿속으로 하고 답만 간단히.\n\n${v.body}\n\n반드시 record_answer 도구를 한 번 호출하세요.` }] }, "record_answer");
+    if (s.solvable === false) check = "다시 풀어 보니 조건이 부족해 답이 하나로 정해지지 않아요.";
+    else {
+      const j = await claude(env, { max_tokens: 800, tools: [JUDGE_TOOL], messages: [{ role: "user", content: `두 답이 수학적으로 같은 답인지 판정하세요. 표기 차이(단위 생략, 순서, 동치식)는 같은 것으로 봅니다.\nA: ${v.answer}\nB: ${s.answer}\n반드시 record_judgement 도구를 호출하세요.` }] }, "record_judgement");
+      verified = !!j.same; check = verified ? "따로 다시 풀어 같은 답을 확인했어요." : `다시 푼 답이 달라요: ${s.answer} (${j.note || ""})`;
+    }
+  } catch (e) { check = "검산하지 못했어요: " + e.message; }
+  return { body: v.body, answer: v.answer, criteria: v.criteria, concept: v.concept, verified, check, model: v.model };
 }
