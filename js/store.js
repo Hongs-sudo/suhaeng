@@ -7,6 +7,7 @@
 //   programs/{pid}/scans/{auto}         스캔 이미지 (학기 끝 일괄 삭제)
 //   programs/{pid}/drafts/{sid_part}    리포트 의견 초안
 //   programs/{pid}/reports/{token}      부모님 공유 리포트 (링크로 누구나 열람)
+//   programs/{pid}/items·figs·sets·reviews·results·config  3단계(Preview·테스트·Review) — bankcache.js 참고
 
 const CFG = window.APP_CONFIG;
 const PID = CFG.programId || "suhaeng";
@@ -106,6 +107,21 @@ class FirebaseStore {
       await Promise.all(s.docs.map(x => this.F.deleteDoc(x.ref))); n += s.size;
     }
   }
+  // 공통 읽기·쓰기 (문제은행·세트·Preview/Review 결과 등 새 기능용)
+  async getX(col, id) { const s = await this.F.getDoc(this.d("programs", PID, col, id)); return s.exists() ? { id: s.id, ...s.data() } : null; }
+  async setX(col, id, data, merge = true) {
+    if (id) { await this.F.setDoc(this.d("programs", PID, col, id), data, { merge }); return id; }
+    const ref = await this.F.addDoc(this.col("programs", PID, col), data); return ref.id;
+  }
+  async delX(col, id) { await this.F.deleteDoc(this.d("programs", PID, col, id)); }
+  async listX(col, where = []) {
+    const q = where.length ? this.F.query(this.col("programs", PID, col), ...where.map(w => this.F.where(...w))) : this.col("programs", PID, col);
+    return this.all(q);
+  }
+  watchX(col, where, cb) {
+    const q = where.length ? this.F.query(this.col("programs", PID, col), ...where.map(w => this.F.where(...w))) : this.col("programs", PID, col);
+    return this.F.onSnapshot(q, s => cb(s.docs.map(x => ({ id: x.id, ...x.data() }))), () => {});
+  }
   async getDraft(key) { const s = await this.F.getDoc(this.d("programs", PID, "drafts", key)); return s.exists() ? s.data() : null; }
   async saveDraft(key, v) { await this.F.setDoc(this.d("programs", PID, "drafts", key), v, { merge: true }); }
   async saveReport(token, data) { await this.F.setDoc(this.d("programs", PID, "reports", token), data); }
@@ -117,10 +133,10 @@ const LS = "suhaeng-demo-v1";
 class DemoStore {
   async init() {
     try { this.s = JSON.parse(localStorage.getItem(LS)); } catch (e) { this.s = null; }
-    if (!this.s) this.s = (await import("./demo-data.js?v=7")).seed();
+    if (!this.s) this.s = (await import("./demo-data.js?v=10")).seed();
   }
   // 스캔 이미지는 용량이 커서 브라우저 저장에서 빼고 메모리에만 둔다 (데모 전용)
-  save() { try { const { scans, ...rest } = this.s; localStorage.setItem(LS, JSON.stringify(rest)); } catch (e) { /* 저장 공간 부족 등은 무시 */ } }
+  save() { try { const { scans, ...rest } = this.s; const x = { ...(rest.x || {}) }; delete x.figs; localStorage.setItem(LS, JSON.stringify({ ...rest, x })); } catch (e) { /* 저장 공간 부족 등은 무시 */ } }
   onAuth(cb) {
     this._cb = cb;
     let who = null; try { who = sessionStorage.getItem(LS + "-who"); } catch (e) {}
@@ -158,6 +174,25 @@ class DemoStore {
   async getScans(sid, r) { return (this.s.scans || {})[`${sid}_${r}`] || []; }
   async countScans() { return Object.values(this.s.scans || {}).reduce((a, x) => a + x.length, 0); }
   async deleteAllScans() { const n = await this.countScans(); this.s.scans = {}; this.save(); return n; }
+  _c(col) { this.s.x = this.s.x || {}; return (this.s.x[col] = this.s.x[col] || {}); }
+  async getX(col, id) { const v = this._c(col)[id]; return v ? JSON.parse(JSON.stringify({ id, ...v })) : null; }
+  async setX(col, id, data, merge = true) {
+    const c = this._c(col), k = id || newToken(12);
+    c[k] = merge ? { ...(c[k] || {}), ...JSON.parse(JSON.stringify(data)) } : JSON.parse(JSON.stringify(data));
+    if (col !== "figs") this.save(); return k;
+  }
+  async delX(col, id) {
+    // 데모에서는 기존 기록이 따로 보관돼 있다
+    if (col === "records") delete this.s.records[id]; else if (col === "analyses") delete this.s.analyses[id]; else if (col === "drafts") delete (this.s.drafts || {})[id];
+    else delete this._c(col)[id];
+    this.save();
+  }
+  async listX(col, where = []) {
+    if (col === "drafts") return Object.entries(this.s.drafts || {}).map(([id, v]) => ({ id, ...v }));
+    const ok = v => where.every(([f, op, val]) => op === "==" ? v[f] === val : op === "in" ? val.includes(v[f]) : true);
+    return Object.entries(this._c(col)).map(([id, v]) => ({ id, ...v })).filter(ok).map(v => JSON.parse(JSON.stringify(v)));
+  }
+  watchX() { return () => {}; }
   async getDraft(k) { return (this.s.drafts || {})[k] || null; }
   async saveDraft(k, v) { this.s.drafts = this.s.drafts || {}; this.s.drafts[k] = { ...(this.s.drafts[k] || {}), ...v }; this.save(); }
   async saveReport(t, d) { this.s.reports = this.s.reports || {}; this.s.reports[t] = d; this.save(); }

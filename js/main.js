@@ -1,10 +1,13 @@
 // 수행평가·서술형 프로그램 관리 앱
-import { createStore, DEMO, newToken } from "./store.js?v=7";
-import { UNITS } from "./rubric.js?v=7";
-import { rubricFor, filesToJpegs, requestAnalysis, requestComment, ERROR_TYPES } from "./analyze.js?v=7";
-import { buildReport, renderReport, reportToBlob, reportToHTML, classAverages, takenRounds, defaultParts, esc, fmt, unitBr } from "./report.js?v=7";
-import { parseWorkbook } from "./excel-import.js?v=7";
-import { viewBulk } from "./bulk.js?v=7";
+import { createStore, DEMO, newToken } from "./store.js?v=10";
+import { unitsOf, unitOf, TERM, termLabel } from "./curriculum.js?v=10";
+import { rubricFor, filesToJpegs, requestAnalysis, requestComment, ERROR_TYPES } from "./analyze.js?v=10";
+import { buildReport, renderReport, reportToBlob, reportToHTML, classAverages, takenRounds, defaultParts, esc, fmt, unitBr } from "./report.js?v=10";
+import { parseWorkbook } from "./excel-import.js?v=10";
+import { viewBulk } from "./bulk.js?v=10";
+import { initThree, viewHome, viewGrade, viewSets, viewSet, viewReviewList, viewReviewOne, viewBank, importOldSeed, rolloverTerm, nextTerm, paintArchive } from "./three.js?v=10";
+import { loadSets, loadResults, RES } from "./bankcache.js?v=10";
+import { setTerm, termKey } from "./curriculum.js?v=10";
 
 const CFG = window.APP_CONFIG;
 const $ = (s, el = document) => el.querySelector(s);
@@ -43,6 +46,7 @@ function lastAt(id) { return Math.max(0, ...Object.values(recs(id)).map(x => x.a
 async function boot() {
   try { S.store = await createStore(); }
   catch (e) { main.innerHTML = `<div class="empty-state">앱을 시작하지 못했습니다. 인터넷 연결을 확인해 주세요.<br><small>${esc(e.message)}</small></div>`; return; }
+  initThree({ S, main, $, $$, toast, busy, recs, stu, sheet, closeSheet, scored, isAdmin });
   S.store.onAuth(async u => {
     S.user = u;
     if (!u) return renderLogin();
@@ -51,23 +55,34 @@ async function boot() {
     renderChrome();
     route();
     if (S.unwatch) S.unwatch();
-    S.unwatch = S.store.watch(st => { S.students = st.sort((a, b) => a.grade - b.grade || a.name.localeCompare(b.name, "ko")); softRefresh(); },
+    const u1 = S.store.watch(st => { S.students = st.sort((a, b) => a.grade - b.grade || a.name.localeCompare(b.name, "ko")); softRefresh(); },
       rc => { S.records = rc; softRefresh(); });
+    // Preview·Review 채점과 Review 구성도 다른 선생님이 바꾸면 바로 반영
+    const u2 = S.store.watchX("results", [["term", "==", termKey()]], rows => { RES.results = {}; rows.forEach(r => RES.results[r.id] = r); softRefresh(); });
+    const u3 = S.store.watchX("reviews", [["term", "==", termKey()]], rows => { RES.reviews = {}; rows.forEach(r => RES.reviews[r.id] = r); softRefresh(); });
+    S.unwatch = () => { u1(); u2(); u3(); };
   });
 }
 async function loadAll() {
-  const [st, rc, th] = await Promise.all([S.store.listStudents(), S.store.listRecords(), S.store.listTeachers().catch(() => [])]);
+  const term = await S.store.getX("config", "term").catch(() => null);
+  setTerm(term);
+  const [st, rc, th] = await Promise.all([S.store.listStudents(), S.store.listRecords(), S.store.listTeachers().catch(() => []),
+    loadSets(S.store).catch(() => {}), loadResults(S.store, termKey()).catch(() => {})]);
   S.students = st.sort((a, b) => a.grade - b.grade || a.name.localeCompare(b.name, "ko"));
   S.records = rc; S.teachers = th;
   if (S.filter.mine == null) S.filter.mine = S.students.some(s => s.teacher === S.user.name);
 }
 window.addEventListener("hashchange", () => S.user && S.user.registered && route());
 
+// [주소, 이름, 아이콘, 휴대폰 아래 메뉴에도 보일지]
 const NAV = [
-  ["#/", "입력", '<path d="M4 20h4L19 9l-4-4L4 16v4z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/>'],
-  ["#/overview", "현황", '<path d="M4 5h16v14H4zM4 10h16M10 10v9" fill="none" stroke="currentColor" stroke-width="1.8"/>'],
-  ["#/reports", "리포트", '<path d="M7 3h7l4 4v14H7zM14 3v4h4M10 12h5M10 16h5" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/>'],
-  ["#/admin", "관리", '<circle cx="12" cy="8" r="3.5" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M5 20c1-4 4-6 7-6s6 2 7 6" fill="none" stroke="currentColor" stroke-width="1.8"/>']
+  ["#/", "홈", '<path d="M4 11l8-7 8 7v9h-5v-6H9v6H4z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/>', 1],
+  ["#/students", "학생", '<circle cx="9" cy="8" r="3" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M3 20c.8-3.5 3.2-5 6-5s5.2 1.5 6 5M16 5.5a3 3 0 0 1 0 5.5M18 15c1.5.6 2.6 2.2 3 5" fill="none" stroke="currentColor" stroke-width="1.8"/>', 1],
+  ["#/sets", "회차·세트", '<path d="M4 5h16v14H4zM4 10h16M10 10v9" fill="none" stroke="currentColor" stroke-width="1.8"/>', 1],
+  ["#/grade", "채점", '<path d="M4 20h4L19 9l-4-4L4 16v4z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/>', 1],
+  ["#/bank", "문제은행", '<path d="M5 4h11l3 3v13H5zM8 10h8M8 14h8" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/>', 0],
+  ["#/reports", "리포트", '<path d="M7 3h7l4 4v14H7zM14 3v4h4M10 12h5M10 16h5" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/>', 1],
+  ["#/admin", "관리", '<circle cx="12" cy="8" r="3.5" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M5 20c1-4 4-6 7-6s6 2 7 6" fill="none" stroke="currentColor" stroke-width="1.8"/>', 0]
 ];
 /* 앱 설치 버튼: 크롬·엣지(PC·안드로이드)는 설치 창, 아이폰은 홈 화면 추가 안내 */
 const isStandalone = () => matchMedia("(display-mode: standalone)").matches || navigator.standalone === true;
@@ -99,15 +114,19 @@ async function onInstall() {
 function renderChrome() {
   const nav = NAV.filter(n => n[0] !== "#/admin" || isAdmin());
   $("#topnav").innerHTML = nav.map(n => `<a href="${n[0]}">${n[1]}</a>`).join("");
-  $("#botnav").style.setProperty("--n", nav.length);
-  $("#botnav").innerHTML = nav.map(n => `<a href="${n[0]}"><svg viewBox="0 0 24 24" aria-hidden="true">${n[2]}</svg>${n[1]}</a>`).join("");
+  const bot = nav.filter(n => n[3]);
+  $("#botnav").style.setProperty("--n", bot.length);
+  $("#botnav").innerHTML = bot.map(n => `<a href="${n[0]}"><svg viewBox="0 0 24 24" aria-hidden="true">${n[2]}</svg>${n[1]}</a>`).join("");
   $("#who").innerHTML = `<button id="install" class="inst" hidden><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 4v11M7 10l5 5 5-5M5 20h14" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg><span>앱 설치</span></button>${DEMO ? '<span class="demo-flag">데모</span>' : ""}<span>${esc(S.user.name || S.user.email)}</span><button id="logout">로그아웃</button>`;
   $("#logout").onclick = () => S.store.signOut();
   $("#install").onclick = onInstall; paintInstall();
   $("#topbar").hidden = false; $("#botnav").hidden = false;
 }
 function markNav(h) {
-  const base = h.startsWith("#/s/") || h.startsWith("#/a/") || h.startsWith("#/bulk") || h === "#/" || h === "" ? "#/" : h.startsWith("#/r/") ? "#/reports" : h.split("?")[0];
+  const base = h === "#/" || h === "" ? "#/" : h.startsWith("#/s/") || h.startsWith("#/overview") || h.startsWith("#/students") ? "#/students"
+    : h.startsWith("#/a/") || h.startsWith("#/bulk") || h.startsWith("#/grade") ? "#/grade"
+    : h.startsWith("#/set") || h.startsWith("#/review") || h.startsWith("#/rv/") ? "#/sets"
+    : h.startsWith("#/r/") ? "#/reports" : h.startsWith("#/bank") ? "#/bank" : h.split("?")[0];
   $$("#topnav a, #botnav a").forEach(a => a.getAttribute("href") === base ? a.setAttribute("aria-current", "page") : a.removeAttribute("aria-current"));
 }
 // 다른 곳에서 데이터가 바뀌면 지금 보는 목록·현황 화면을 조용히 다시 그린다 (입력 중일 때는 건너뜀)
@@ -116,7 +135,7 @@ function softRefresh() {
   clearTimeout(softT);
   softT = setTimeout(() => {
     const h = location.hash || "#/";
-    if (!/^#\/(|overview|reports|s\/[^/]+(\/\d+)?)$/.test(h)) return;
+    if (!/^#\/(|students|overview|reports|grade(\/\w+(\/\d+){0,2})?|review(\/\d+){0,2}|s\/[^/]+(\/\d+)?)$/.test(h)) return;
     if ($("#sheet-host").innerHTML.trim()) return;
     const a = document.activeElement; if (a && /INPUT|TEXTAREA|SELECT/.test(a.tagName)) return;
     const y = window.scrollY; route(true); window.scrollTo(0, y);
@@ -133,14 +152,21 @@ function route(soft = false) {
   if (p[0] === "r" && stu(p[1])) return viewReport(p[1], p[2] === "all" ? "all" : +(p[2] ?? 0));
   if (p[0] === "admin" && isAdmin()) return viewAdmin();
   if (p[0] === "bulk") return viewBulk({ S, main, $, $$, toast, busy, recs, stu, today, newToken });
-  return viewList();
+  if (p[0] === "students") return viewList();
+  if (p[0] === "grade") return viewGrade(p[1] || "preview", +p[2] || 0, +p[3] || 0);
+  if (p[0] === "sets") return viewSets(+p[1] || 0, +p[2] || 0);
+  if (p[0] === "set" && p[3]) return viewSet(+p[1], +p[2], +p[3]);
+  if (p[0] === "review") return viewReviewList(+p[1] || 0, +p[2] || 0);
+  if (p[0] === "rv" && stu(p[1])) return viewReviewOne(p[1], +p[2]);
+  if (p[0] === "bank") return viewBank();
+  return viewHome();
 }
 
 /* ================================================================ 로그인 */
 function renderLogin() {
   $("#topbar").hidden = true; $("#botnav").hidden = true;
   main.innerHTML = `<div class="login"><div class="box">
-    <img src="img/logo.png" alt="수학도서관">
+    <img src="img/logo-gb.png" alt="수학도서관" class="login-logo">
     <h1>${esc(CFG.programName)}</h1>
     <p class="muted">선생님 구글 계정으로 로그인해 주세요.</p>
     <button class="gbtn" id="g"><svg width="18" height="18" viewBox="0 0 48 48" aria-hidden="true"><path fill="#EA4335" d="M24 9.5c3.5 0 6.6 1.2 9 3.6l6.7-6.7C35.6 2.4 30.2 0 24 0 14.6 0 6.6 5.4 2.7 13.2l7.8 6.1C12.4 13.6 17.7 9.5 24 9.5z"/><path fill="#4285F4" d="M46.1 24.5c0-1.6-.1-3.1-.4-4.5H24v9h12.4c-.5 2.9-2.2 5.3-4.6 7l7.2 5.6c4.2-3.9 7.1-9.6 7.1-17.1z"/><path fill="#FBBC05" d="M10.5 28.7A14.5 14.5 0 0 1 9.5 24c0-1.6.3-3.2.8-4.7l-7.8-6.1A24 24 0 0 0 0 24c0 3.9.9 7.5 2.6 10.8l7.9-6.1z"/><path fill="#34A853" d="M24 48c6.5 0 11.9-2.1 15.9-5.8l-7.2-5.6c-2 1.4-4.7 2.3-8.7 2.3-6.3 0-11.6-4.1-13.5-9.8l-7.9 6.1C6.6 42.6 14.6 48 24 48z"/></svg>${DEMO ? "데모로 둘러보기" : "Google 계정으로 로그인"}</button>
@@ -151,7 +177,7 @@ function renderLogin() {
 }
 function renderNotRegistered() {
   $("#topbar").hidden = true; $("#botnav").hidden = true;
-  main.innerHTML = `<div class="login"><div class="box"><img src="img/logo.png" alt="수학도서관">
+  main.innerHTML = `<div class="login"><div class="box"><img src="img/logo-gb.png" alt="수학도서관" class="login-logo">
     <h1>등록되지 않은 계정입니다</h1>
     <p class="muted">${esc(S.user.email)} 계정은 아직 선생님으로 등록되지 않았습니다. 원장님께 등록을 요청해 주세요.</p>
     <button class="btn" id="out">다른 계정으로 로그인</button></div></div>`;
@@ -162,10 +188,10 @@ function renderNotRegistered() {
 function viewList() {
   const f = S.filter;
   const q = f.q.trim();
-  let list = S.students.filter(s => (!f.mine || s.teacher === S.user.name) && (!f.grade || s.grade === f.grade) && (!q || s.name.includes(q) || (s.school || "").includes(q)));
+  let list = S.students.filter(s => s.status !== "졸업" && (!f.mine || s.teacher === S.user.name) && (!f.grade || s.grade === f.grade) && (!q || s.name.includes(q) || (s.school || "").includes(q)));
   list.sort((a, b) => (a.status !== "재원") - (b.status !== "재원") || lastAt(b.id) - lastAt(a.id) || a.name.localeCompare(b.name, "ko"));
   const nPend = S.students.filter(s => !f.mine || s.teacher === S.user.name).reduce((a, s) => a + Object.values(recs(s.id)).filter(x => x && x.pending).length, 0);
-  main.innerHTML = `<div class="page-head"><h1>점수 입력</h1><span class="sp"></span>${nPend ? (() => { const q0 = pendingQueue()[0]; return q0 ? `<a class="btn sm gold" href="#/a/${q0.id}/${q0.k}">확인 대기 <b class="num">${nPend}</b>건 확인하기</a>` : ""; })() : ""}<a class="btn sm" href="#/bulk">시험지 일괄 올리기</a><span class="muted small">${list.length}명</span></div>
+  main.innerHTML = `<div class="page-head"><h1>학생</h1><span class="sp"></span><a class="btn sm" href="#/overview">현황표</a>${nPend ? (() => { const q0 = pendingQueue()[0]; return q0 ? `<a class="btn sm gold" href="#/a/${q0.id}/${q0.k}">확인 대기 <b class="num">${nPend}</b>건 확인하기</a>` : ""; })() : ""}<a class="btn sm" href="#/bulk">시험지 일괄 올리기</a><span class="muted small">${list.length}명</span></div>
     <div class="list-tools">
       <input class="input" id="q" type="search" placeholder="학생 이름·학교 검색" value="${esc(f.q)}" aria-label="학생 검색" autocomplete="off">
       <div class="chips" id="fchips">
@@ -183,7 +209,7 @@ function stuCard(s) {
   return `<a class="stu ${s.status !== "재원" ? "off" : ""}" href="#/s/${s.id}">
     <span class="r1"><b>${esc(s.name)} <small>${esc(s.school)} · 중${s.grade}${s.teacher ? " · " + esc(s.teacher) : ""}</small></b><small class="num">${s.status !== "재원" ? `<span class="pill">${s.status}</span>` : `${n}/10`}</small></span>
     <span class="dots">${Array.from({ length: 10 }, (_, k) => { const x = r[k + 1]; return `<i class="${x && x.analyzed ? "an" : scored(x) ? "on" : ""}"></i>`; }).join("")}</span>
-    <span class="next">${nx == null ? "10회 모두 기록됨" : `다음 빈 회차: ${nx}회 ${esc(UNITS[s.grade][nx - 1])}`}</span></a>`;
+    <span class="next">${nx == null ? "10회 모두 기록됨" : `다음 빈 회차: ${nx}회 ${esc(unitOf(s.grade, nx))}`}</span></a>`;
 }
 
 /* ================================================================ 학생 상세 + 입력 시트 */
@@ -192,11 +218,11 @@ function viewStudent(id, openRound) {
   const v = Object.values(r).filter(scored).map(x => x.score);
   const t = takenRounds(r), nx = nextRound(id);
   main.innerHTML = `<div class="narrow" style="max-width:900px">
-    <div class="stu-head"><a class="back" href="#/" aria-label="목록으로">‹</a>
+    <div class="stu-head"><a class="back" href="#/students" aria-label="목록으로">‹</a>
       <div style="flex:1;min-width:0"><h1>${esc(s.name)}</h1><div class="meta">${esc(s.school)} · 중${g} · 담당 ${esc(s.teacher || "미지정")}${s.status !== "재원" ? ` · <span class="pill bad">${s.status}</span>` : ""}</div></div>
       <button class="btn sm" id="edit-stu">정보 수정</button></div>
     <div class="sum num"><div>응시<b>${v.length}/10</b></div><div>평균<b>${v.length ? fmt(v.reduce((a, b) => a + b, 0) / v.length) : "–"}</b></div><div>최근 응시<b>${t.length ? t[t.length - 1].round + "회" : "–"}</b></div></div>
-    <div class="rounds">${UNITS[g].map((u, i) => {
+    <div class="rounds">${unitsOf(g).map((u, i) => {
       const k = i + 1, x = r[k];
       const cls = !x && k === nx ? "todo" : !x ? "empty" : "";
       const right = !x ? (k === nx ? `<span class="sc">+ 입력</span>` : "") : x.status === "결시" ? `<span class="pill">결시</span>` : x.status === "채점불가" ? `<span class="pill">채점불가</span>` : `<span class="sc num">${fmt(x.score)}${x.aiScore ? '<small style="color:var(--warn)">AI 점수</small>' : x.pending ? '<small style="color:var(--warn)">확인 대기</small>' : x.analyzed ? '<small style="color:var(--gold)">분석 완료</small>' : ""}</span>`;
@@ -204,9 +230,11 @@ function viewStudent(id, openRound) {
       return `<button class="rnd ${cls}" data-r="${k}"><span class="no">${k}회</span><span class="u">${unitBr(g, k)}${sub}</span>${right}</button>`;
     }).join("")}</div>
     <div class="stu-actions"><a class="btn" href="#/r/${id}/1">리포트 보기</a></div>
+    <div id="arch" hidden></div>
     <p class="small muted">회차는 순서와 상관없이 아무 칸이나 눌러 입력할 수 있습니다. 리포트는 응시한 날짜 순서대로 5회씩 묶습니다.</p></div>`;
   $(".rounds").onclick = e => { const b = e.target.closest(".rnd"); if (b) openInput(id, +b.dataset.r); };
   $("#edit-stu").onclick = () => openStudentForm(s);
+  paintArchive($("#arch"), id);
   if (openRound) openInput(id, openRound);
 }
 
@@ -222,7 +250,7 @@ function openInput(id, k) {
   const s = stu(id), x = recs(id)[k];
   const st = { val: x && typeof x.score === "number" ? String(x.score) : "", date: x?.date || today(), status: x?.status || "응시" };
   const el = sheet(`<div class="grab"></div>
-    <h4>${k}회 · ${esc(UNITS[s.grade][k - 1])}<small>${esc(s.name)}</small></h4>
+    <h4>${k}회 · ${esc(unitOf(s.grade, k))}<small>${esc(s.name)}</small></h4>
     <div class="sdate" id="sd"></div>
     <div class="disp num"><b id="dv"></b><span>/ 50</span></div>
     <div class="err-msg" id="em"></div>
@@ -293,7 +321,7 @@ function openStudentForm(s) {
     <label class="small muted">이름<input class="input" id="f-n" value="${esc(s.name)}"></label>
     <label class="small muted">학교<input class="input" id="f-s" value="${esc(s.school)}" placeholder="예: 월촌"></label>
     <div class="row"><label class="small muted" style="flex:1">학년<select class="input" id="f-g">${[1, 2, 3].map(g => `<option value="${g}" ${s.grade === g ? "selected" : ""}>중${g}</option>`).join("")}</select></label>
-    <label class="small muted" style="flex:1">상태<select class="input" id="f-st">${["재원", "휴원", "퇴원"].map(v => `<option ${s.status === v ? "selected" : ""}>${v}</option>`).join("")}</select></label></div>
+    <label class="small muted" style="flex:1">상태<select class="input" id="f-st">${["재원", "휴원", "퇴원", "졸업"].map(v => `<option ${s.status === v ? "selected" : ""}>${v}</option>`).join("")}</select></label></div>
     <label class="small muted">담당 선생님<input class="input" id="f-t" list="tlist" value="${esc(s.teacher || "")}"><datalist id="tlist">${teacherNames().map(n => `<option value="${esc(n)}">`).join("")}</datalist></label>
     <div class="acts"><button class="btn" data-close>취소</button><button class="btn fill" id="f-sv">저장</button></div>
     ${!isNew && isAdmin() ? `<button class="btn sm danger" id="f-del" style="align-self:flex-start">학생 삭제</button>` : ""}`);
@@ -310,14 +338,14 @@ function openStudentForm(s) {
   if (del) del.onclick = async () => {
     if (!confirm(`${s.name} 학생과 회차 기록을 삭제할까요? 되돌릴 수 없습니다.`)) return;
     await S.store.deleteStudent(s.id); S.students = S.students.filter(x => x.id !== s.id);
-    toast("삭제했어요"); closeSheet(); location.hash = "#/";
+    toast("삭제했어요"); closeSheet(); location.hash = "#/students";
   };
 }
 
 /* ================================================================ 시험지 분석 */
 async function viewAnalysis(id, k) {
   const s = stu(id), g = s.grade, x = recs(id)[k];
-  const unit = UNITS[g][k - 1];
+  const unit = unitOf(g, k);
   const A = { images: [], result: null, saved: null, edit: false };
   // 확인 대기 순서: 이 화면을 열 때의 목록을 기억해 두고 이전/다음으로 넘긴다
   if (!S.review || !S.review.some(q => q.id === id && q.k === k)) S.review = x && x.pending ? pendingQueue() : null;
@@ -459,7 +487,7 @@ function printReport(d) {
 function viewOverview() {
   const o = S.ov, g = o.grade;
   if (o.teacher === "" && !isAdmin() && S.students.some(s => s.teacher === S.user.name)) o.teacher = S.user.name;
-  const list = S.students.filter(s => s.grade === g && (!o.teacher || s.teacher === o.teacher) && (o.status === "전체" || s.status === "재원"));
+  const list = S.students.filter(s => s.grade === g && s.status !== "졸업" && (!o.teacher || s.teacher === o.teacher) && (o.status === "전체" || s.status === "재원"));
   const cs = Array(11).fill(0), cn = Array(11).fill(0);
   const rows = list.map(s => {
     const r = recs(s.id), v = [];
@@ -481,7 +509,7 @@ function viewOverview() {
       <select id="ssel" aria-label="재원 상태"><option value="재원" ${o.status === "재원" ? "selected" : ""}>재원생만</option><option value="전체" ${o.status === "전체" ? "selected" : ""}>휴원·퇴원 포함</option></select>
       <span class="small muted">${list.length}명</span>
     </div>
-    <div class="tblwrap"><table class="ov num"><thead><tr><th style="text-align:left">학생</th><th>담당</th>${UNITS[g].map((u, i) => `<th><b>${i + 1}회</b>${unitBr(g, i + 1)}</th>`).join("")}<th>평균</th><th>응시</th></tr></thead>
+    <div class="tblwrap"><table class="ov num"><thead><tr><th style="text-align:left">학생</th><th>담당</th>${unitsOf(g).map((u, i) => `<th><b>${i + 1}회</b>${unitBr(g, i + 1)}</th>`).join("")}<th>평균</th><th>응시</th></tr></thead>
       <tbody>${rows || `<tr><td colspan="14" class="empty-state">해당하는 학생이 없습니다.</td></tr>`}</tbody>
       <tfoot><tr><td class="n">회차 평균</td><td></td>${cs.slice(1).map((c, i) => `<td>${cn[i + 1] ? fmt(c / cn[i + 1]) : ""}</td>`).join("")}<td></td><td></td></tr></tfoot></table></div>
     <div class="legend"><span>칸을 누르면 바로 입력·수정</span><span><span style="color:var(--good)">■</span> 40점 이상</span><span><span style="color:var(--bad)">■</span> 25점 미만</span><span><span style="color:var(--gold)">●</span> 시험지 분석 완료</span><span><span style="color:var(--warn)">┅</span> 엑셀에서 회차를 추정한 칸 (확인 필요)</span><span><span style="color:var(--warn)">○</span> 분석 확인 대기</span><span><i>기울임</i> AI 점수 (확인 전, 평균에서 제외)</span><span>회차 평균은 응시한 학생만으로 계산</span></div>`;
@@ -500,7 +528,7 @@ function loadXLSX() {
 }
 async function downloadExcel(g, list) {
   const XLSX = await loadXLSX();
-  const head = ["학생", "학교", "학년", "담당", "상태"]; UNITS[g].forEach((u, i) => head.push(`${i + 1}회 날짜`, `${i + 1}회 ${u}`)); head.push("평균", "응시");
+  const head = ["학생", "학교", "학년", "담당", "상태"]; unitsOf(g).forEach((u, i) => head.push(`${i + 1}회 날짜`, `${i + 1}회 ${u}`)); head.push("평균", "응시");
   const aoa = [head];
   list.forEach(s => {
     const r = recs(s.id), row = [s.name, s.school, s.grade, s.teacher, s.status], v = [];
@@ -535,6 +563,12 @@ function viewReports() {
   qi.onkeydown = e => { if (e.key === "Enter" && list[0]) location.hash = `#/r/${list[0].id}/0`; };
 }
 
+// 이번 학기 Preview·Review 점수 (리포트 표에 함께 넣음)
+function stageScores(sid) {
+  const out = {};
+  Object.values(RES.results).forEach(x => { if (x.sid === sid && x.status === "응시" && typeof x.score === "number" && x.complete) (out[x.round] = out[x.round] || {})[x.stage] = x.score; });
+  return out;
+}
 /* ================================================================ 리포트 만들기: 차시 정하기 · 의견 · 보내기 */
 const reportBase = () => location.href.split("#")[0].replace(/index\.html$/, "").replace(/[^/]*$/, "");
 async function viewReport(id, pi) {
@@ -554,7 +588,7 @@ async function viewReport(id, pi) {
   const cur = () => isAll ? { label: "전체", rounds: takenRounds(rounds).map(x => x.round), ...P.all } : P.parts[idx];
   const curObj = () => isAll ? P.all : P.parts[idx];
   const avgs = classAverages(S.students, S.records);
-  const build = () => { const c = cur(); return buildReport({ student: s, rounds, analyses, avgs, selection: c.rounds, label: c.label, comments: c.comments, showComments: c.showComments, cfg: CFG }); };
+  const build = () => { const c = cur(); return buildReport({ student: s, rounds, analyses, avgs, selection: c.rounds, label: c.label, comments: c.comments, showComments: c.showComments, cfg: CFG, stages: stageScores(id) }); };
   let saveT = null;
   const persist = (now = false) => {
     clearTimeout(saveT);
@@ -579,7 +613,7 @@ async function viewReport(id, pi) {
             const r = i + 1, x = rounds[r], ok = x && typeof x.score === "number" && x.status !== "결시" && !x.aiScore;
             const on = cur().rounds.includes(r), other = P.parts.findIndex((p, j) => j !== idx && p.rounds.includes(r));
             const note = !x ? "미응시" : x.status === "결시" ? "결시" : x.aiScore ? "AI 점수 확인 전" : !ok ? x.status : `${md(x.date)}${other >= 0 ? " · " + esc(P.parts[other].label) : ""}`;
-            return `<label class="${on ? "on" : other >= 0 ? "other" : ok ? "" : "none"}"><input type="checkbox" data-r="${r}" ${on ? "checked" : ""} ${ok ? "" : "disabled"}><b>${r}회</b><span>${esc(UNITS[s.grade][i])}</span><small>${ok ? fmt(x.score) + "점 · " : ""}${note}</small></label>`;
+            return `<label class="${on ? "on" : other >= 0 ? "other" : ok ? "" : "none"}"><input type="checkbox" data-r="${r}" ${on ? "checked" : ""} ${ok ? "" : "disabled"}><b>${r}회</b><span>${esc(unitOf(s.grade, i + 1))}</span><small>${ok ? fmt(x.score) + "점 · " : ""}${note}</small></label>`;
           }).join("")}</div>
           ${(() => { const un = t.map(x => x.round).filter(r => !P.parts.some(p => p.rounds.includes(r))).sort((a, b) => a - b); return un.length ? `<p class="small" style="margin:6px 0 0;color:var(--warn)">아직 어느 차시에도 들어가지 않은 회차: ${un.join("·")}회</p>` : ""; })()}
           ${P.parts.length > 1 ? `<button class="btn sm danger" id="pdel" style="margin-top:8px">${esc(cur().label)} 삭제</button>` : ""}`}
@@ -728,6 +762,17 @@ async function viewAdmin() {
       <p class="small muted" style="margin:0">학생 ${S.students.length}명 · 재원 ${S.students.filter(s => s.status === "재원").length}명. 학생 정보 수정·삭제는 학생 화면의 '정보 수정'에서 합니다.</p>
       <div class="row" style="display:flex;gap:8px;flex-wrap:wrap"><button class="btn sm" id="addst">학생 추가</button><button class="btn sm" id="backup">백업 파일 내려받기</button></div>
     </section>
+    <section class="card"><h2>문제은행 · 진행 학기</h2>
+      <p class="small muted" style="margin:0">지금 진행 중인 학기: <b>${termLabel()}</b>. 테스트 점수 · 시험지 분석 · 리포트는 이 학기에 쌓여요.</p>
+      <p class="small muted" style="margin:0">2026년 2학기 중1~중3 수행평가 300문항(본문 · 정답 · 채점기준 · 그림)을 문제은행에 넣습니다. 이미 넣은 문항은 건너뛰어요.</p>
+      <button class="btn sm" id="seedold" style="align-self:flex-start">2026년 2학기 수행평가 문항 넣기</button>
+    </section>
+    <section class="card"><h2>학기 넘기기</h2>
+      <p class="small muted" style="margin:0"><b>${termLabel()}</b> → <b>${termLabel(nextTerm())}</b>. 지금 학기의 테스트 점수 · 시험지 분석 · 리포트 차시 설정을 보관함으로 옮기고, 새 학기 1~10회를 빈 칸으로 시작해요. 지난 기록은 학생 화면의 '지난 학기 기록'에서 볼 수 있고, 이미 보낸 리포트 링크는 그대로 열려요.${TERM.sem === 2 ? " 2학기에서 넘길 때는 <b>학년을 하나씩 올리고, 중3은 '졸업'으로 바꿔 목록에서 숨겨요.</b>" : ""}${nextTerm().year >= 2027 ? " 새 학기부터 Preview · Review가 켜져요." : ""}</p>
+      <p class="small muted" style="margin:0">2차 리포트를 모두 보낸 뒤에 해 주세요. 되돌릴 수 없어요.</p>
+      <input class="input" id="rollconf" placeholder="넘기려면 '학기 넘기기'라고 입력" aria-label="학기 넘기기 확인">
+      <button class="btn sm danger" id="roll" disabled style="align-self:flex-start">${termLabel(nextTerm())}로 넘기기</button>
+    </section>
     <section class="card"><h2>학기 정리</h2>
       <p class="small muted" style="margin:0">보관 중인 시험지 스캔 <b class="num">${scanCount}</b>장. 학기가 끝나면 스캔 원본만 일괄 삭제합니다. 점수와 분석 결과, 리포트는 남습니다.</p>
       <input class="input" id="delconf" placeholder="삭제하려면 '스캔 삭제'라고 입력" aria-label="삭제 확인">
@@ -735,6 +780,9 @@ async function viewAdmin() {
       ${DEMO ? `<button class="btn sm" id="reset" style="align-self:flex-start">데모 데이터 처음으로</button>` : ""}
     </section></div>`;
   paintTeachers();
+  $("#seedold").onclick = e => importOldSeed(e.currentTarget);
+  $("#rollconf").oninput = e => $("#roll").disabled = e.target.value.trim() !== "학기 넘기기";
+  $("#roll").onclick = e => rolloverTerm(e.currentTarget);
   // 선생님 명단
   let cands = [];
   const showCands = () => {

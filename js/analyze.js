@@ -1,5 +1,7 @@
 // 시험지 스캔 처리 + 분석 서버 호출
-import { RUBRIC, UNITS } from "./rubric.js?v=7";
+import { RUBRIC } from "./rubric.js?v=10";
+import { unitOf, isLegacyTerm, TERM, setKey } from "./curriculum.js?v=10";
+import { BANK } from "./bankcache.js?v=10";
 
 export const ERROR_TYPES = ["개념 이해", "조건 해석", "계산 실수", "풀이 과정 서술", "미응답"];
 
@@ -20,7 +22,9 @@ export function parseSteps(criteria) {
 }
 
 export function rubricFor(grade, round) {
-  const items = (RUBRIC[grade] || {})[round] || [];
+  // 2026년 2학기는 예전 채점기준표, 그 뒤 학기는 확정된 테스트 세트의 문항 채점기준
+  const items = isLegacyTerm() ? ((RUBRIC[grade] || {})[round] || [])
+    : ((BANK.sets[setKey(TERM.sem, grade, round)] || {}).test || []).map((id, i) => { const it = BANK.items[id] || {}; return { no: i + 1, answer: it.answer || "", criteria: it.criteria || "" }; });
   return items.map(it => ({ no: it.no, answer: it.answer, criteria: it.criteria, steps: parseSteps(it.criteria) }));
 }
 
@@ -72,7 +76,7 @@ export async function filesToJpegs(files) {
 /* ---------- 분석 서버 호출 ---------- */
 export async function requestAnalysis({ store, grade, round, images, entered }) {
   const rubric = rubricFor(grade, round);
-  const unit = UNITS[grade][round - 1];
+  const unit = unitOf(grade, round);
   const cfg = window.APP_CONFIG;
   if (!cfg.workerUrl) {
     await new Promise(r => setTimeout(r, 1200));
@@ -81,7 +85,7 @@ export async function requestAnalysis({ store, grade, round, images, entered }) 
   const res = await fetch(cfg.workerUrl.replace(/\/$/, "") + "/analyze", {
     method: "POST",
     headers: { "Content-Type": "application/json", Authorization: "Bearer " + await store.idToken() },
-    body: JSON.stringify({ grade, round, unit, entered, images: images.map(d => d.split(",")[1]), rubric: rubric.map(({ no, answer, criteria, steps }) => ({ no, answer, criteria, steps })) })
+    body: JSON.stringify({ grade, sem: TERM.sem, round, unit, entered, images: images.map(d => d.split(",")[1]), rubric: rubric.map(({ no, answer, criteria, steps }) => ({ no, answer, criteria, steps })) })
   });
   const j = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(j.error || `분석 서버 오류 (${res.status})`);

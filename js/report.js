@@ -1,10 +1,10 @@
 // 부모님 리포트: 데이터 만들기 + 화면 그리기 + 이미지·HTML 파일 만들기 (앱과 공유 페이지가 함께 사용)
 // 부모님께 나가는 리포트에는 날짜를 넣지 않고 회차 번호 순서로만 보여 준다.
-import { UNITS, UNIT_LINES } from "./rubric.js?v=7";
+import { unitOf, unitLinesOf } from "./curriculum.js?v=10";
 
 export const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 export const fmt = n => n == null || isNaN(n) ? "–" : (Math.round(n * 10) / 10).toString();
-export const unitBr = (g, r) => esc((UNIT_LINES[g] || [])[r - 1] || "").replace(/\n/g, "<br>");
+export const unitBr = (g, r) => esc(unitLinesOf(g)[r - 1] || "").replace(/\n/g, "<br>");
 
 // 응시한 회차 (확인 전 AI 점수는 제외), 응시 날짜 순
 export function takenRounds(rounds) {
@@ -40,7 +40,7 @@ export function classAverages(students, records) {
  * @param label     "1차" 등
  * @param showComments 선생님 종합 의견 포함 여부
  */
-export function buildReport({ student, rounds, analyses, avgs, selection, label, comments, showComments, cfg }) {
+export function buildReport({ student, rounds, analyses, avgs, selection, label, comments, showComments, cfg, stages = {} }) {
   const g = student.grade;
   const taken = takenRounds(rounds);
   const set = new Set(selection || []);
@@ -48,8 +48,9 @@ export function buildReport({ student, rounds, analyses, avgs, selection, label,
     const a = analyses[x.round];
     const ok = a && a.confirmed;
     return {
-      round: x.round, unit: UNITS[g][x.round - 1], score: x.score,
+      round: x.round, unit: unitOf(g, x.round), unitLine: unitLinesOf(g)[x.round - 1] || unitOf(g, x.round), score: x.score,
       classAvg: avgs[`${g}_${x.round}`] ?? null,
+      preview: (stages[x.round] || {}).preview ?? null, review: (stages[x.round] || {}).review ?? null,
       items: ok ? a.items.map(i => i.score) : null,
       errs: ok ? a.items.filter(i => i.score < 5 && i.error_type).map(i => i.error_type) : []
     };
@@ -102,6 +103,7 @@ function chartSVG(rows, wide = false) {
 export function renderReport(d, logoSrc = "img/logo.png") {
   const s = d.student, k = d.kpi, rows = d.rows;
   const analyzed = rows.filter(r => r.items);
+  const st3 = rows.some(r => r.preview != null || r.review != null); // Preview·Review 결과가 있으면 표에 함께
   const kpi4 = k.itemsTotal
     ? `<div><small>만점 문항</small><b>${k.full}</b><i> / ${k.itemsTotal}문항</i></div>`
     : `<div><small>최저 점수</small><b>${fmt(k.worst)}</b><i> ${k.worstRound ? k.worstRound + "회" : ""}</i></div>`;
@@ -141,8 +143,8 @@ export function renderReport(d, logoSrc = "img/logo.png") {
     <div class="${analyzed.length ? "r-two" : "r-one"}">
       <div class="r-sec"><h3>회차별 점수</h3><div class="chart">${chartSVG(rows, !analyzed.length)}</div>
         <div class="heat-leg"><span><i style="background:var(--p-green)"></i>내 점수</span><span><i class="ln"></i>학년 평균</span></div></div>
-      <div class="r-sec"><h3>단원별 결과</h3><table class="r-tbl num"><thead><tr><th>회차</th><th>단원</th><th class="r">점수</th><th class="r">학년 평균</th></tr></thead><tbody>
-        ${rows.map(r => `<tr><td>${r.round}회</td><td>${analyzed.length ? unitBr(s.grade, r.round) : esc(r.unit)}</td><td class="s">${fmt(r.score)}</td><td class="a">${fmt(r.classAvg)}</td></tr>`).join("")}
+      <div class="r-sec"><h3>단원별 결과</h3><table class="r-tbl num"><thead><tr><th>회차</th><th>단원</th>${st3 ? `<th class="r">Preview</th>` : ""}<th class="r">${st3 ? "테스트" : "점수"}</th>${st3 ? `<th class="r">Review</th>` : ""}<th class="r">학년 평균</th></tr></thead><tbody>
+        ${rows.map(r => `<tr><td>${r.round}회</td><td>${analyzed.length ? esc(r.unitLine || r.unit).replace(/\n/g, "<br>") : esc(r.unit)}</td>${st3 ? `<td class="a">${fmt(r.preview)}</td>` : ""}<td class="s">${fmt(r.score)}</td>${st3 ? `<td class="a">${fmt(r.review)}</td>` : ""}<td class="a">${fmt(r.classAvg)}</td></tr>`).join("")}
       </tbody></table></div>
     </div>
     ${analysis}
@@ -182,7 +184,7 @@ let assets = null;
 async function loadAssets() {
   if (!assets) assets = (async () => {
     const [css, logo] = await Promise.all([
-      fetch("css/report.css?v=7").then(r => r.text()),
+      fetch("css/report.css?v=10").then(r => r.text()),
       fetch("img/logo.png").then(r => r.blob()).then(b => new Promise(ok => { const fr = new FileReader(); fr.onload = () => ok(fr.result); fr.readAsDataURL(b); }))
     ]);
     return { css, logo };

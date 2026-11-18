@@ -1,6 +1,6 @@
 // 엑셀(구글시트 내보내기) → 학생·회차 점수 변환
 // 시트 이름이 "수행평가_" 로 시작하는 시트만 읽는다 (얼리어답터 등은 제외).
-import { UNITS } from "./rubric.js?v=7";
+import { unitsOf } from "./curriculum.js?v=10";
 
 const STATUS_WORDS = ["퇴원", "휴원", "신규", "내신"];
 const norm = s => String(s ?? "").replace(/\s+/g, "").replace(/[()（）]/g, m => (m === "（" ? "(" : m === "）" ? ")" : m));
@@ -17,7 +17,7 @@ export function roundFromUnit(v, grade) {
   const m = s.match(/^(\d{1,2})\s*(?:[.회]|(?=[^\d]))/);
   if (m) { const n = +m[1]; if (n >= 1 && n <= 10) return n; }
   const t = norm(s);
-  const list = UNITS[grade] || [];
+  const list = unitsOf(grade);
   // 정확히 같은 이름 우선, 그다음 포함 관계 (괄호 번호가 다르면 다른 단원)
   for (let i = 0; i < list.length; i++) if (norm(list[i]) === t) return i + 1;
   const hits = [];

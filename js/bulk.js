@@ -1,7 +1,7 @@
 // 시험지 일괄 올리기: 여러 학생 시험지를 한 파일로 올려 학생·회차별로 나누고 차례로 분석
-import { UNITS } from "./rubric.js?v=7";
-import { filesToPageBlobs, blobToDataURL, shrinkBlob, requestIdentify, requestAnalysis } from "./analyze.js?v=7";
-import { esc, fmt } from "./report.js?v=7";
+import { unitOf } from "./curriculum.js?v=10";
+import { filesToPageBlobs, blobToDataURL, shrinkBlob, requestIdentify, requestAnalysis } from "./analyze.js?v=10";
+import { esc, fmt } from "./report.js?v=10";
 
 const B = { pages: [], thumbs: [], reads: [], groups: [], grade: 0, round: 0, fileName: "", running: null };
 const ID_BATCH = 8, ID_PARALLEL = 2, AN_PARALLEL = 2, MAX_PAGES = 6;
@@ -10,7 +10,7 @@ export async function viewBulk(ctx) {
   const { S, main, $, toast } = ctx;
   const jobs = (await S.store.listJobs().catch(() => [])).sort((a, b) => (b.at || 0) - (a.at || 0));
   const open = jobs.filter(j => (j.items || []).some(i => i.status !== "done"));
-  main.innerHTML = `<div class="stu-head"><a class="back" href="#/" aria-label="입력으로">‹</a><div style="flex:1;min-width:0"><h1>시험지 일괄 올리기</h1>
+  main.innerHTML = `<div class="stu-head"><a class="back" href="#/grade/test" aria-label="채점으로">‹</a><div style="flex:1;min-width:0"><h1>시험지 일괄 올리기</h1>
       <div class="meta">여러 학생 시험지를 한 파일로 스캔해 올리면 학생·회차별로 나눠 차례로 분석합니다</div></div></div>
     <div class="bulk">
       ${open.length ? `<section class="card bk"><h2>진행 중인 작업</h2>${open.map(j => { const d = (j.items || []).filter(i => i.status === "done").length; return `<div class="bk-row"><span><b>${esc(j.fileName || "일괄 작업")}</b> <span class="small muted">${new Date(j.at).toLocaleString("ko-KR", { month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" })} · ${esc(String(j.byName || ""))}</span><br><span class="small num">${d} / ${(j.items || []).length}건 완료</span></span><span class="row"><button class="btn sm fill" data-resume="${j.id}">이어서 진행</button><button class="btn sm" data-drop="${j.id}">목록에서 지우기</button></span></div>`; }).join("")}</section>` : ""}
@@ -256,5 +256,5 @@ function paintPending(ctx) {
   rows.sort((a, b) => a.s.grade - b.s.grade || a.s.name.localeCompare(b.s.name, "ko") || a.r - b.r);
   el.innerHTML = `<h2>확인 대기 <span class="pill gold num">${rows.length}</span></h2>
     <p class="small muted" style="margin:0">${mine ? "내 학생" : "전체 학생"} 중 분석이 끝나고 선생님 확인을 기다리는 시험지입니다. 눌러서 확인하고 저장하세요.</p>
-    ${rows.length ? `<div class="bk-prog num">${rows.map(({ s, r, x }) => `<a href="#/a/${s.id}/${r}"><span>${esc(s.name)} <small class="muted">중${s.grade} ${r}회 ${esc(UNITS[s.grade][r - 1])}</small></span><span>${x.aiScore ? `AI ${fmt(x.score)}점` : `${fmt(x.score)}점`}</span></a>`).join("")}</div>` : `<p class="empty-state" style="padding:12px">확인을 기다리는 시험지가 없어요.</p>`}`;
+    ${rows.length ? `<div class="bk-prog num">${rows.map(({ s, r, x }) => `<a href="#/a/${s.id}/${r}"><span>${esc(s.name)} <small class="muted">중${s.grade} ${r}회 ${esc(unitOf(s.grade, r))}</small></span><span>${x.aiScore ? `AI ${fmt(x.score)}점` : `${fmt(x.score)}점`}</span></a>`).join("")}</div>` : `<p class="empty-state" style="padding:12px">확인을 기다리는 시험지가 없어요.</p>`}`;
 }
